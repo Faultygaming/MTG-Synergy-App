@@ -25,6 +25,10 @@ permissions:
   contents: read
   packages: write
   id-token: write
+  # actions:write is required by the docker buildx cache-to=type=gha
+  # exporter (it writes to the Actions cache service). Missing this is
+  # silent in many setups but fails the build job in others.
+  actions: write
 
 env:
   REGISTRY: ghcr.io
@@ -83,6 +87,10 @@ jobs:
           # PRs build amd64 only to keep CI fast.
           platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
           push: ${{ github.event_name != 'pull_request' }}
+          # `load: true` makes docker buildx populate the daemon's image
+          # store so we can inspect the result on PR builds (push: false
+          # otherwise discards the image). Only safe with single-arch.
+          load: ${{ github.event_name == 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
@@ -91,6 +99,9 @@ jobs:
             APP_BUILT_AT=${{ github.event.repository.pushed_at || github.event.head_commit.timestamp }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # Surface BuildKit progress lines verbatim so failures are
+          # easier to read in the Actions log.
+          provenance: false
 
       - name: Print image digest
         run: |
