@@ -1,0 +1,34 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+  background: #0e0e10;
+  color: #e7e5e4;
+}
+
+body {
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+}
+
+/* Cytoscape canvas should fill its container */
+.cy-host {
+  width: 100%;
+  height: 100%;
+  background:
+    radial-gradient(1200px 600px at 40% 30%, rgba(212, 175, 55, 0.04), transparent),
+    radial-gradient(1000px 800px at 70% 70%, rgba(56, 189, 248, 0.04), transparent),
+    #0e0e10;
+}

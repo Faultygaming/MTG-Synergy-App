@@ -1,0 +1,64 @@
+// Schema for MTG Synergy Map.
+// SQLite for local-first dev; swap provider + DATABASE_URL for Postgres later.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// One row per unique oracle card (a "card" across all printings).
+model Card {
+  id              String   @id              // Scryfall oracle_id
+  name            String   @unique
+  manaCost        String?
+  cmc             Float?
+  typeLine        String
+  oracleText      String?
+  colors          String                    // JSON array, e.g. ["R","W"]
+  colorIdentity   String                    // JSON array
+  power           String?
+  toughness       String?
+  // Keywords extracted by lib/synergy/keywords.ts: union of Scryfall's
+  // printed keywords, tribe/type tokens, and regex-pack matches.
+  keywordsJson    String                    // JSON array of normalized keyword strings
+  imageSmall      String?
+  imageNormal     String?
+  scryfallUri     String?
+  edhrecRank      Int?
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
+
+  deckCards       DeckCard[]
+}
+
+model Deck {
+  id          String     @id @default(cuid())
+  name        String
+  format      String     @default("commander")  // commander is the v1 first-class format
+  commanderId String?                            // FK to Card.id, primary commander
+  partnerId   String?                            // FK to Card.id, partner / background slot
+  // Cached snapshot of validation violations from src/lib/commander/rules.ts.
+  // JSON array of { kind, ...payload }; empty array = legal deck.
+  violationsJson String  @default("[]")
+  notes       String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  cards       DeckCard[]
+}
+
+model DeckCard {
+  deckId   String
+  cardId   String
+  quantity Int    @default(1)
+
+  deck Deck @relation(fields: [deckId], references: [id], onDelete: Cascade)
+  card Card @relation(fields: [cardId], references: [id])
+
+  @@id([deckId, cardId])
+  @@index([deckId])
+}

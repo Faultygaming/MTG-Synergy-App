@@ -1,0 +1,28 @@
+node_modules
+.next
+out
+dist
+.turbo
+
+# env
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# data: SQLite + bulk Scryfall downloads stay local
+data/*.db
+data/*.db-journal
+data/*.sqlite
+data/*.sqlite-journal
+data/scryfall-bulk/
+
+# logs / misc
+*.log
+.DS_Store
+.vscode
+.idea
+
+# prisma generated client (regenerated on install)
+src/generated
+tsconfig.tsbuildinfo
