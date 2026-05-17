@@ -8,9 +8,12 @@ import { SynergyMap } from "@/components/SynergyMap";
 import {
   formatViolation,
   isCandidateLegal,
+  DEFAULT_CONFIG,
   type CommanderLegalityCard,
+  type CommanderRulesConfig,
   type Violation,
 } from "@/lib/commander/rules";
+import { RulesConfigPanel } from "@/components/RulesConfigPanel";
 
 interface CardRow {
   id: string;
@@ -78,6 +81,12 @@ export default async function DeckPage({
 
   const top = topThreeKeywords(entries);
   const violations = JSON.parse(deck.violationsJson) as Violation[];
+  const blockers = violations.filter((v) => v.severity === "block");
+  const warnings = violations.filter((v) => v.severity === "warn");
+  const rulesConfig: CommanderRulesConfig = {
+    ...DEFAULT_CONFIG,
+    ...(JSON.parse(deck.rulesConfigJson || "{}") as Partial<CommanderRulesConfig>),
+  };
 
   // Candidate pool: every card in the DB that's not already in the deck
   // AND is legal in the commander's color identity (banned / out-of-CI filtered).
@@ -93,7 +102,12 @@ export default async function DeckPage({
   const candidates: CardSummary[] = [];
   for (const row of candidateRows) {
     const legality = rowToLegality(row);
-    if (deck.format === "commander" && !isCandidateLegal(legality, commanders)) continue;
+    if (
+      deck.format === "commander" &&
+      !isCandidateLegal(legality, commanders, rulesConfig)
+    ) {
+      continue;
+    }
     candidates.push(rowToSummary(row));
   }
   const suggestions: SynergySuggestion[] = rankCandidates(candidates, entries).slice(0, 60);
@@ -135,23 +149,48 @@ export default async function DeckPage({
               new deck
             </Link>
           </div>
-          {violations.length > 0 && (
+          {blockers.length > 0 && (
             <div className="mt-3 rounded border border-red-900/60 bg-red-950/40 p-2 text-xs text-red-300">
               <div className="mb-1 font-semibold uppercase tracking-wider text-red-200">
-                Commander rule violations ({violations.length})
+                Blocking violations ({blockers.length})
               </div>
               <ul className="ml-4 list-disc space-y-0.5">
-                {violations.slice(0, 6).map((v, i) => (
+                {blockers.slice(0, 6).map((v, i) => (
                   <li key={i}>{formatViolation(v)}</li>
                 ))}
-                {violations.length > 6 && (
+                {blockers.length > 6 && (
                   <li className="text-red-400/70">
-                    …and {violations.length - 6} more
+                    …and {blockers.length - 6} more
                   </li>
                 )}
               </ul>
             </div>
           )}
+          {warnings.length > 0 && (
+            <div className="mt-2 rounded border border-amber-900/60 bg-amber-950/30 p-2 text-xs text-amber-200">
+              <div className="mb-1 font-semibold uppercase tracking-wider text-amber-100">
+                Warnings ({warnings.length})
+              </div>
+              <ul className="ml-4 list-disc space-y-0.5">
+                {warnings.slice(0, 6).map((v, i) => (
+                  <li key={i}>{formatViolation(v)}</li>
+                ))}
+                {warnings.length > 6 && (
+                  <li className="text-amber-400/70">
+                    …and {warnings.length - 6} more
+                  </li>
+                )}
+              </ul>
+            </div>
+          )}
+          <details className="mt-2 text-xs">
+            <summary className="cursor-pointer text-stone-500 hover:text-stone-300">
+              Rules settings
+            </summary>
+            <div className="mt-2 rounded border border-ink-line bg-ink/40 p-3">
+              <RulesConfigPanel deckId={deck.id} initial={rulesConfig} />
+            </div>
+          </details>
         </header>
         <div className="relative min-h-0 flex-1">
           <SynergyMap entries={entries} top={top} />

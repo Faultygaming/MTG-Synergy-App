@@ -7,8 +7,20 @@ import { extractKeywords } from "@/lib/synergy/keywords";
 import { extractDeckId, importMoxfieldDeck } from "@/lib/moxfield";
 import {
   validateCommanderDeck,
+  DEFAULT_CONFIG,
   type CommanderLegalityCard,
+  type CommanderRulesConfig,
 } from "@/lib/commander/rules";
+
+const RuleSeveritySchema = z.enum(["off", "warn", "block"]);
+const RulesConfigSchema = z.object({
+  deckSize: RuleSeveritySchema.optional(),
+  singleton: RuleSeveritySchema.optional(),
+  colorIdentity: RuleSeveritySchema.optional(),
+  banlist: RuleSeveritySchema.optional(),
+  commanderLegality: RuleSeveritySchema.optional(),
+  globalMode: z.enum(["strict", "warn"]).optional(),
+});
 
 const BodySchema = z.union([
   z.object({
@@ -16,10 +28,12 @@ const BodySchema = z.union([
     name: z.string().min(1).max(120),
     decklist: z.string().min(1).max(50_000),
     commanders: z.array(z.string().min(1)).max(2).optional(),
+    rulesConfig: RulesConfigSchema.optional(),
   }),
   z.object({
     kind: z.literal("moxfield"),
     url: z.string().min(1).max(500),
+    rulesConfig: RulesConfigSchema.optional(),
   }),
 ]);
 
@@ -193,13 +207,22 @@ export async function POST(req: Request) {
     );
   }
 
+  // Per-deck rule severities, merged with the engine defaults.
+  const rulesConfig: CommanderRulesConfig = {
+    ...DEFAULT_CONFIG,
+    ...(body.rulesConfig ?? {}),
+  };
+
   // Validate against Commander rules (only when format is commander).
   const violations =
     format === "commander"
-      ? validateCommanderDeck({
-          commanders: commanderCards,
-          cards: resolved.map((r) => ({ card: r.card, quantity: r.quantity })),
-        })
+      ? validateCommanderDeck(
+          {
+            commanders: commanderCards,
+            cards: resolved.map((r) => ({ card: r.card, quantity: r.quantity })),
+          },
+          rulesConfig,
+        )
       : [];
 
   // Merge duplicate cardIds into a single DeckCard row (commander uses
@@ -214,6 +237,7 @@ export async function POST(req: Request) {
       commanderId: commanderIds[0] ?? null,
       partnerId: commanderIds[1] ?? null,
       violationsJson: JSON.stringify(violations),
+      rulesConfigJson: JSON.stringify(rulesConfig),
       cards: {
         create: Array.from(merged, ([cardId, quantity]) => ({ cardId, quantity })),
       },

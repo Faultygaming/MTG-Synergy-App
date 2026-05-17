@@ -16,6 +16,7 @@ data/*.db-journal
 data/*.sqlite
 data/*.sqlite-journal
 data/scryfall-bulk/
+prisma/data/
 
 # logs / misc
 *.log

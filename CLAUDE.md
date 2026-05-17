@@ -108,6 +108,52 @@ When extending these rules, **also update**: the test file
 `src/lib/commander/rules.test.ts`, this section of CLAUDE.md, and the
 "banlist last refreshed" comment in `rules.ts`.
 
+#### Per-rule severity toggles (off / warn / block)
+
+Every rule can be set independently to **`off` / `warn` / `block`** via
+`CommanderRulesConfig` (`src/lib/commander/config.ts`). Defaults are all
+`block`. Persistence: `Deck.rulesConfigJson` per deck.
+
+- `block`: emits a violation with `severity: "block"`. UI shows it as an
+  error; `hasBlockingViolations()` returns true; `isCandidateLegal()`
+  filters cards that would trip this rule.
+- `warn`: emits a violation with `severity: "warn"`. UI shows it in a
+  softer banner; candidate-pool filtering is NOT applied.
+- `off`: the check is skipped entirely; no violations of this kind emit.
+
+There's also a `globalMode` knob (`"strict" | "warn"`) that downgrades
+every `block` to `warn` in one switch — used by the per-deck "permissive"
+mode in the UI. Rules set to `off` stay off regardless.
+
+The deck page exposes the toggle UI via `<RulesConfigPanel>` (`src/components/RulesConfigPanel.tsx`).
+It PATCHes `/api/decks/[id]/rules`, which re-runs validation and persists
+the new config + fresh violations.
+
+### Multi-source card data (`src/lib/sources/`)
+
+`src/lib/sources/types.ts` defines `CardSource` and `MergedCard`. The
+`resolveCard(name)` aggregator in `aggregator.ts` calls every registered
+source in priority order (lower = higher priority) and merges results:
+
+- **Core fields** (typeLine, oracleText, mana cost, images, etc.):
+  first-non-empty wins, respecting priority.
+- **Arrays** (`printedKeywords`, `oracleTags`): unioned across sources.
+- **Source-specific extras** (`edhrecRank`, `edhrecSynergy`): first-set wins.
+
+Current sources:
+
+| Source   | Priority | Status | Purpose |
+|----------|----------|--------|---------|
+| scryfall | 10       | live   | Canonical card data, images, printed keywords |
+| mtgjson  | 20       | stub   | EDHREC rank, ruling provenance, alt-name lookup |
+| edhrec   | 30       | stub   | Lift / co-occurrence stats for synergy scoring |
+| tagger   | 40       | stub   | Scryfall oracle tags (`otag:`), retired once bulk ingest writes them per-Card row |
+
+A failing source is silently skipped (logged in dev), so the aggregator
+keeps working as long as Scryfall is up. When implementing a stub, also
+add its env vars to `.env.example` and document the ToS / rate-limit
+caveat in the adapter's leading comment.
+
 ### Moxfield import (egress caveat)
 
 `src/lib/moxfield.ts` calls `https://api2.moxfield.com/v3/decks/all/<id>`.
@@ -118,9 +164,13 @@ paste-mode flow (`{ kind: "paste" }`) instead.
 
 ### Article-driven candidate pools
 
-For the user's specific deck (the World Shaper / Hearthhull precon)
-there's a curated upgrade-pool file at
-`data/world-shaper-upgrade-pool.json` and a resolver script
+The user's actual decklist (Hearthhull, the Worldseed / World Shaper
+precon, BRG) is captured as a plain-text fixture at
+`data/decks/hearthhull-world-shaper.txt` — that's the canonical demo
+deck for end-to-end tests.
+
+For the broader upgrade-pool (cards the CoolStuffInc article recommends),
+there's `data/world-shaper-upgrade-pool.json` and a resolver script
 (`scripts/seed-upgrade-pool.ts`). Run with internet access:
 
 ```bash

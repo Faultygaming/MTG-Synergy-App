@@ -26,6 +26,15 @@
 //   - Bracket / power-level rules (those are social, not format-legal).
 
 import type { CardSummary } from "../types";
+import {
+  DEFAULT_CONFIG,
+  effectiveSeverity,
+  type CommanderRulesConfig,
+  type RuleSeverity,
+} from "./config";
+
+export type { CommanderRulesConfig, RuleSeverity } from "./config";
+export { DEFAULT_CONFIG } from "./config";
 
 export interface CommanderLegalityCard extends CardSummary {
   colorIdentity?: string[];        // e.g. ["G","W"] — Scryfall's color_identity.
@@ -40,7 +49,7 @@ export interface CommanderDeckInput {
   commanders: CommanderLegalityCard[];
 }
 
-export type Violation =
+type ViolationKind =
   | { kind: "deck-size"; expected: 100; actual: number }
   | { kind: "no-commander" }
   | { kind: "too-many-commanders"; count: number }
@@ -49,10 +58,7 @@ export type Violation =
       cardName: string;
       reason: "not-legendary" | "not-creature-or-eligible-pw";
     }
-  | {
-      kind: "partners-not-allowed";
-      cardName: string;
-    }
+  | { kind: "partners-not-allowed"; cardName: string }
   | {
       kind: "color-identity";
       cardName: string;
@@ -61,6 +67,11 @@ export type Violation =
     }
   | { kind: "singleton"; cardName: string; quantity: number }
   | { kind: "banned"; cardName: string };
+
+// Every emitted violation carries the severity it was emitted at. UI
+// surfaces "block" as errors and "warn" as warnings; "off" rules never
+// produce violations at all.
+export type Violation = ViolationKind & { severity: "warn" | "block" };
 
 // Snapshot of the Commander banned list (the Commander Format Panel list,
 // mirrored by WotC at https://magic.wizards.com/en/banned-restricted-list).
@@ -199,24 +210,37 @@ function isBackground(card: CommanderLegalityCard): boolean {
   return /\bbackground\b/i.test((card.typeLine ?? "").toLowerCase());
 }
 
-export function validateCommanderDeck(input: CommanderDeckInput): Violation[] {
+export function validateCommanderDeck(
+  input: CommanderDeckInput,
+  config: CommanderRulesConfig = DEFAULT_CONFIG,
+): Violation[] {
   const violations: Violation[] = [];
   const { commanders, cards } = input;
 
+  const sevDeckSize = effectiveSeverity("deckSize", config);
+  const sevSingleton = effectiveSeverity("singleton", config);
+  const sevCi = effectiveSeverity("colorIdentity", config);
+  const sevBanlist = effectiveSeverity("banlist", config);
+  const sevLegality = effectiveSeverity("commanderLegality", config);
+
+  const push = (sev: RuleSeverity, v: ViolationKind) => {
+    if (sev === "off") return;
+    violations.push({ ...v, severity: sev });
+  };
+
   // --- Commander slot ---
   if (commanders.length === 0) {
-    violations.push({ kind: "no-commander" });
+    push(sevLegality, { kind: "no-commander" });
   } else if (commanders.length > 2) {
-    violations.push({ kind: "too-many-commanders", count: commanders.length });
+    push(sevLegality, { kind: "too-many-commanders", count: commanders.length });
   } else {
     for (const cmd of commanders) {
       const r = isCommanderLegal(cmd);
       if (r !== true) {
-        violations.push({ kind: "illegal-commander", cardName: cmd.name, reason: r });
+        push(sevLegality, { kind: "illegal-commander", cardName: cmd.name, reason: r });
       }
     }
     if (commanders.length === 2) {
-      // Both must have partner-style text, OR exactly one is a Background.
       const oneIsBackground = commanders.some(isBackground);
       const bothPartner = commanders.every(hasPartner);
       const backgroundPairValid =
@@ -225,7 +249,7 @@ export function validateCommanderDeck(input: CommanderDeckInput): Violation[] {
       if (!bothPartner && !backgroundPairValid) {
         for (const c of commanders) {
           if (!hasPartner(c) && !isBackground(c)) {
-            violations.push({ kind: "partners-not-allowed", cardName: c.name });
+            push(sevLegality, { kind: "partners-not-allowed", cardName: c.name });
           }
         }
       }
@@ -235,28 +259,28 @@ export function validateCommanderDeck(input: CommanderDeckInput): Violation[] {
   // --- Deck size ---
   const total = cards.reduce((s, e) => s + e.quantity, 0) + commanders.length;
   if (total !== 100) {
-    violations.push({ kind: "deck-size", expected: 100, actual: total });
+    push(sevDeckSize, { kind: "deck-size", expected: 100, actual: total });
   }
 
   // --- Singleton + banned + color identity ---
   const ci = colorIdentityUnion(commanders);
   for (const e of cards) {
     if (COMMANDER_BANNED.has(e.card.name)) {
-      violations.push({ kind: "banned", cardName: e.card.name });
+      push(sevBanlist, { kind: "banned", cardName: e.card.name });
     }
     if (
       e.quantity > 1 &&
       !BASIC_LANDS.has(e.card.name) &&
       !UNLIMITED_COPIES_ALLOWED.has(e.card.name)
     ) {
-      violations.push({
+      push(sevSingleton, {
         kind: "singleton",
         cardName: e.card.name,
         quantity: e.quantity,
       });
     }
     if (commanders.length > 0 && !isSubset(e.card.colorIdentity ?? [], ci)) {
-      violations.push({
+      push(sevCi, {
         kind: "color-identity",
         cardName: e.card.name,
         cardCi: e.card.colorIdentity ?? [],
@@ -268,18 +292,34 @@ export function validateCommanderDeck(input: CommanderDeckInput): Violation[] {
   return violations;
 }
 
-// Quick predicate used by /api/cards/suggest to filter the candidate pool
-// before scoring. Returns true if a candidate card is legal to ADD to a
-// commander deck (color-identity compliant + not banned + not already at
-// max copies). Caller is responsible for "already in deck" exclusion.
+// Returns true if there are any "block"-severity violations. Used by
+// callers to decide whether to refuse an action (e.g. add-card) vs just
+// surface a warning. Pure UI/UX hook — the data layer still saves the deck.
+export function hasBlockingViolations(violations: Violation[]): boolean {
+  return violations.some((v) => v.severity === "block");
+}
+
+// Filter for the candidate pool. Returns true if a candidate card is
+// legal-to-add given the deck's currently active rule severities. Rules
+// set to "warn" or "off" are NOT enforced here — i.e. cards that would
+// merely warn (not block) are still suggested.
 export function isCandidateLegal(
   candidate: CommanderLegalityCard,
   commanders: CommanderLegalityCard[],
+  config: CommanderRulesConfig = DEFAULT_CONFIG,
 ): boolean {
-  if (COMMANDER_BANNED.has(candidate.name)) return false;
-  if (commanders.length === 0) return true; // no commander → no CI to check yet
-  const ci = colorIdentityUnion(commanders);
-  return isSubset(candidate.colorIdentity ?? [], ci);
+  if (
+    effectiveSeverity("banlist", config) === "block" &&
+    COMMANDER_BANNED.has(candidate.name)
+  ) {
+    return false;
+  }
+  if (commanders.length === 0) return true;
+  if (effectiveSeverity("colorIdentity", config) === "block") {
+    const ci = colorIdentityUnion(commanders);
+    if (!isSubset(candidate.colorIdentity ?? [], ci)) return false;
+  }
+  return true;
 }
 
 export function formatViolation(v: Violation): string {

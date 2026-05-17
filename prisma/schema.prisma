@@ -42,8 +42,13 @@ model Deck {
   commanderId String?                            // FK to Card.id, primary commander
   partnerId   String?                            // FK to Card.id, partner / background slot
   // Cached snapshot of validation violations from src/lib/commander/rules.ts.
-  // JSON array of { kind, ...payload }; empty array = legal deck.
+  // JSON array of { kind, ...payload, severity }; empty array = legal deck.
   violationsJson String  @default("[]")
+  // Per-deck Commander rules config (see src/lib/commander/config.ts).
+  // JSON shape: { deckSize, singleton, colorIdentity, banlist,
+  //   commanderLegality, globalMode? } where each rule is "off" | "warn" | "block".
+  // Missing rows use DEFAULT_CONFIG.
+  rulesConfigJson String @default("{}")
   notes       String?
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
