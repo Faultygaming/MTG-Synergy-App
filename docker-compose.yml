@@ -50,6 +50,11 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
+      # Pin the Docker SDK's API version. Without this, Watchtower's SDK
+      # falls back to v1.25, which modern Docker daemons (≥ engine 23,
+      # API min 1.40+) reject with "client version 1.25 is too old".
+      # 1.44 covers Docker engine 25.x+; bump if your host is newer.
+      DOCKER_API_VERSION: "1.44"
       # Only update containers that opted in via the label above.
       WATCHTOWER_LABEL_ENABLE: "true"
       # Poll every 5 minutes; tune via WATCHTOWER_POLL_INTERVAL (seconds).
