@@ -39,6 +39,7 @@ pnpm db:push            # apply prisma/schema.prisma to ./data/synergy.db
 pnpm db:studio          # open Prisma Studio
 pnpm seed               # load data/fixtures.json (~20 demo cards)
 pnpm ingest [--force]   # bulk-ingest Scryfall oracle_cards (~120MB download)
+pnpm ingest:tags [tag…] # ingest Scryfall oracle tags (otag:) for the curated list in data/oracle-tags.json (or a subset). Network-bound; run after `pnpm ingest`.
 ```
 
 First-time setup: `pnpm install && cp .env.example .env && pnpm db:push && pnpm seed && pnpm dev`.
@@ -140,19 +141,25 @@ source in priority order (lower = higher priority) and merges results:
 - **Arrays** (`printedKeywords`, `oracleTags`): unioned across sources.
 - **Source-specific extras** (`edhrecRank`, `edhrecSynergy`): first-set wins.
 
-Current sources:
+Current runtime sources:
 
 | Source   | Priority | Status | Purpose |
 |----------|----------|--------|---------|
 | scryfall | 10       | live   | Canonical card data, images, printed keywords |
 | mtgjson  | 20       | stub   | EDHREC rank, ruling provenance, alt-name lookup |
 | edhrec   | 30       | stub   | Lift / co-occurrence stats for synergy scoring |
-| tagger   | 40       | stub   | Scryfall oracle tags (`otag:`), retired once bulk ingest writes them per-Card row |
 
-A failing source is silently skipped (logged in dev), so the aggregator
-keeps working as long as Scryfall is up. When implementing a stub, also
-add its env vars to `.env.example` and document the ToS / rate-limit
-caveat in the adapter's leading comment.
+The Scryfall **Tagger** is NOT a runtime source — its oracle tags are
+ingested once via `pnpm ingest:tags` (script: `scripts/ingest-oracle-tags.ts`)
+and persisted on `Card.oracleTagsJson`. `extractKeywords()` accepts these
+as a second argument and unions them in as `otag:*` keywords. To refresh
+tags: re-run `pnpm ingest:tags` (the seed/ingest scripts preserve existing
+tags during a Scryfall refresh).
+
+A failing runtime source is silently skipped (logged in dev), so the
+aggregator keeps working as long as Scryfall is up. When implementing a
+stub, also add its env vars to `.env.example` and document the ToS /
+rate-limit caveat in the adapter's leading comment.
 
 ### Moxfield import (egress caveat)
 

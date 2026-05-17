@@ -62,4 +62,47 @@ describe("extractKeywords", () => {
     });
     expect(kws).toContain("ramp");
   });
+
+  it("unions Scryfall oracle tags into the keyword set as 'otag:*'", () => {
+    const kws = extractKeywords(
+      {
+        keywords: [],
+        type_line: "Creature — Elf Druid",
+        oracle_text: "",
+        produced_mana: [],
+      },
+      ["ramp", "mana-dork", "card-advantage"],
+    );
+    expect(kws).toContain("otag:ramp");
+    expect(kws).toContain("otag:mana-dork");
+    expect(kws).toContain("otag:card-advantage");
+  });
+
+  it("normalizes oracle tags (case + punctuation) when unioning", () => {
+    const kws = extractKeywords(
+      { keywords: [], type_line: "Sorcery", oracle_text: "", produced_mana: [] },
+      ["Card Advantage", "+1/+1 Counters"],
+    );
+    expect(kws).toContain("otag:card-advantage");
+    expect(kws).toContain("otag:1-1-counters");
+  });
+
+  it("empty oracle-tag list is a no-op (back-compat)", () => {
+    const a = extractKeywords({
+      keywords: ["Flying"],
+      type_line: "Creature — Bird",
+      oracle_text: "",
+      produced_mana: [],
+    });
+    const b = extractKeywords(
+      {
+        keywords: ["Flying"],
+        type_line: "Creature — Bird",
+        oracle_text: "",
+        produced_mana: [],
+      },
+      [],
+    );
+    expect(a).toEqual(b);
+  });
 });

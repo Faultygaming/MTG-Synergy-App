@@ -17,17 +17,16 @@ import type { CardSource, MergedCard, SourceCard } from "./types";
 import { scryfallSource } from "./scryfall";
 import { mtgjsonSource } from "./mtgjson";
 import { edhrecSource } from "./edhrec";
-import { taggerSource } from "./tagger";
 
 // Registry. Order doesn't matter — sorted by `priority` at fetch time.
 // Sources can be toggled off by removing them from this array; eventually
 // we'll move this behind an env-driven config.
-const SOURCES: CardSource[] = [
-  scryfallSource,
-  mtgjsonSource,
-  edhrecSource,
-  taggerSource,
-];
+//
+// Note: the Scryfall Tagger isn't a runtime source. Oracle tags live on the
+// Card row (`oracleTagsJson`) once `pnpm ingest:tags` has populated them,
+// and `extractKeywords()` unions them into the keyword set at extract time.
+// See scripts/ingest-oracle-tags.ts for the pipeline.
+const SOURCES: CardSource[] = [scryfallSource, mtgjsonSource, edhrecSource];
 
 function firstString(...values: Array<string | undefined>): string | undefined {
   for (const v of values) if (v && v.length > 0) return v;

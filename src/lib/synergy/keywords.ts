@@ -66,7 +66,15 @@ const ORACLE_TEXT_PATTERNS: Array<{ keyword: string; pattern: RegExp }> = [
   { keyword: "menace",            pattern: /\bmenace\b/i },
 ];
 
-export function extractKeywords(card: Pick<ScryfallCard, "keywords" | "type_line" | "oracle_text" | "produced_mana">): string[] {
+export function extractKeywords(
+  card: Pick<ScryfallCard, "keywords" | "type_line" | "oracle_text" | "produced_mana">,
+  // Optional: Scryfall oracle tags attached to this card by the Tagger
+  // (e.g. ["ramp", "card-advantage", "synergy-graveyard"]). When provided,
+  // they're unioned into the keyword set alongside printed keywords. The
+  // ingest script (`pnpm ingest:tags`) is responsible for populating these
+  // per card; runtime callers pass [] when tags haven't been ingested yet.
+  oracleTags: string[] = [],
+): string[] {
   const out = new Set<string>();
 
   // 1. Printed keywords from Scryfall.
@@ -94,6 +102,14 @@ export function extractKeywords(card: Pick<ScryfallCard, "keywords" | "type_line
     for (const { keyword, pattern } of ORACLE_TEXT_PATTERNS) {
       if (pattern.test(text)) out.add(keyword);
     }
+  }
+
+  // 6. Scryfall oracle tags. Namespaced with "otag:" so they don't collide
+  // with regex-pack labels and remain attributable (e.g. an EDHREC search
+  // by tag still works).
+  for (const t of oracleTags) {
+    const n = normalizeKeyword(t);
+    if (n) out.add(`otag:${n}`);
   }
 
   // Drop noise tokens that don't carry synergy signal.

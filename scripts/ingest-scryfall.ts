@@ -77,12 +77,24 @@ async function main() {
   let i = 0;
   for (const c of cards) {
     if (!c.oracle_id) continue;
-    const keywords = extractKeywords({
-      keywords: c.keywords ?? [],
-      type_line: c.type_line,
-      oracle_text: c.oracle_text ?? "",
-      produced_mana: c.produced_mana ?? [],
+    // Preserve oracle tags from a prior `pnpm ingest:tags` run; bulk ingest
+    // refreshes printed fields but tags are scoped to the otag: pipeline.
+    const existing = await prisma.card.findUnique({
+      where: { id: c.oracle_id },
+      select: { oracleTagsJson: true },
     });
+    const oracleTags = existing
+      ? (JSON.parse(existing.oracleTagsJson) as string[])
+      : [];
+    const keywords = extractKeywords(
+      {
+        keywords: c.keywords ?? [],
+        type_line: c.type_line,
+        oracle_text: c.oracle_text ?? "",
+        produced_mana: c.produced_mana ?? [],
+      },
+      oracleTags,
+    );
     const images = c.image_uris ?? c.card_faces?.[0]?.image_uris;
     await prisma.card.upsert({
       where: { id: c.oracle_id },

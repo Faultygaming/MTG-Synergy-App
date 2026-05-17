@@ -40,12 +40,15 @@ async function main() {
       continue;
     }
     const summary = toCardSummary(sc);
-    const keywords = extractKeywords({
-      keywords: sc.keywords ?? [],
-      type_line: sc.type_line,
-      oracle_text: sc.oracle_text ?? "",
-      produced_mana: sc.produced_mana ?? [],
-    });
+    const keywords = extractKeywords(
+      {
+        keywords: sc.keywords ?? [],
+        type_line: sc.type_line,
+        oracle_text: sc.oracle_text ?? "",
+        produced_mana: sc.produced_mana ?? [],
+      },
+      [],
+    );
     await prisma.card.upsert({
       where: { id: summary.id },
       create: {

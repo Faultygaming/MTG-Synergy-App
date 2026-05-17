@@ -83,12 +83,23 @@ function rowToLegalityCard(card: {
 
 async function upsertScryfallCard(sc: ScryfallCard) {
   const summary = toCardSummary(sc);
-  const keywords = extractKeywords({
-    keywords: sc.keywords ?? [],
-    type_line: sc.type_line,
-    oracle_text: sc.oracle_text ?? "",
-    produced_mana: sc.produced_mana ?? [],
+  // Preserve any previously-ingested oracle tags (from `pnpm ingest:tags`).
+  const existing = await prisma.card.findUnique({
+    where: { id: summary.id },
+    select: { oracleTagsJson: true },
   });
+  const oracleTags = existing
+    ? (JSON.parse(existing.oracleTagsJson) as string[])
+    : [];
+  const keywords = extractKeywords(
+    {
+      keywords: sc.keywords ?? [],
+      type_line: sc.type_line,
+      oracle_text: sc.oracle_text ?? "",
+      produced_mana: sc.produced_mana ?? [],
+    },
+    oracleTags,
+  );
   return prisma.card.upsert({
     where: { id: summary.id },
     create: {
@@ -103,6 +114,7 @@ async function upsertScryfallCard(sc: ScryfallCard) {
       power: sc.power ?? null,
       toughness: sc.toughness ?? null,
       keywordsJson: JSON.stringify(keywords),
+      oracleTagsJson: JSON.stringify(oracleTags),
       imageSmall: summary.imageSmall ?? null,
       imageNormal: summary.imageNormal ?? null,
       scryfallUri: summary.scryfallUri ?? null,

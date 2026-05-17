@@ -23,8 +23,12 @@ model Card {
   power           String?
   toughness       String?
   // Keywords extracted by lib/synergy/keywords.ts: union of Scryfall's
-  // printed keywords, tribe/type tokens, and regex-pack matches.
+  // printed keywords, tribe/type tokens, regex-pack matches, and
+  // (when ingested) Scryfall oracle tags from `oracleTagsJson`.
   keywordsJson    String                    // JSON array of normalized keyword strings
+  // Scryfall oracle tags ("otag:ramp", "synergy-graveyard", ...) attached
+  // to this card. Populated by `pnpm ingest:tags`; empty until then.
+  oracleTagsJson  String   @default("[]")
   imageSmall      String?
   imageNormal     String?
   scryfallUri     String?

@@ -19,12 +19,24 @@ async function main() {
   console.log(`Loading ${cards.length} fixture cards...`);
 
   for (const c of cards) {
-    const keywords = extractKeywords({
-      keywords: c.keywords ?? [],
-      type_line: c.type_line,
-      oracle_text: c.oracle_text ?? "",
-      produced_mana: c.produced_mana ?? [],
+    // Preserve any oracle tags already in the DB from a previous
+    // `pnpm ingest:tags` run, so re-seeding fixtures doesn't wipe them.
+    const existing = await prisma.card.findUnique({
+      where: { id: c.oracle_id ?? c.id },
+      select: { oracleTagsJson: true },
     });
+    const oracleTags = existing
+      ? (JSON.parse(existing.oracleTagsJson) as string[])
+      : [];
+    const keywords = extractKeywords(
+      {
+        keywords: c.keywords ?? [],
+        type_line: c.type_line,
+        oracle_text: c.oracle_text ?? "",
+        produced_mana: c.produced_mana ?? [],
+      },
+      oracleTags,
+    );
     const images = c.image_uris ?? c.card_faces?.[0]?.image_uris;
     await prisma.card.upsert({
       where: { id: c.oracle_id ?? c.id },
@@ -40,6 +52,7 @@ async function main() {
         power: c.power ?? null,
         toughness: c.toughness ?? null,
         keywordsJson: JSON.stringify(keywords),
+        oracleTagsJson: JSON.stringify(oracleTags),
         imageSmall: images?.small ?? null,
         imageNormal: images?.normal ?? null,
         scryfallUri: c.scryfall_uri ?? null,
