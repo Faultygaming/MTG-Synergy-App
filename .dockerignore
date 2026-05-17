@@ -1,0 +1,34 @@
+# Files that don't belong in the Docker build context. Keeping this list
+# tight cuts build time and ensures secrets in .env never leak into a layer.
+node_modules
+.next
+out
+dist
+.turbo
+
+.git
+.gitignore
+.github
+.vscode
+.idea
+.DS_Store
+
+# secrets / local-only state
+.env
+.env.local
+.env.*.local
+
+# local DB + bulk downloads (mounted as a volume at runtime instead)
+data/*.db
+data/*.db-journal
+data/*.sqlite
+data/scryfall-bulk
+
+# CI/CD artifacts and meta files
+*.log
+tsconfig.tsbuildinfo
+docker-compose.yml
+Dockerfile
+.dockerignore
+README.md
+CLAUDE.md

@@ -1,0 +1,56 @@
+{
+  "name": "mtg-synergy-map",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Word-map style synergy explorer and deck builder for Magic: The Gathering",
+  "packageManager": "pnpm@9.12.3",
+  "scripts": {
+    "preinstall": "node scripts/check-package-manager.mjs",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:studio": "prisma studio",
+    "seed": "tsx scripts/seed-fixtures.ts",
+    "ingest": "tsx scripts/ingest-scryfall.ts",
+    "ingest:tags": "tsx scripts/ingest-oracle-tags.ts"
+  },
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  },
+  "dependencies": {
+    "@prisma/adapter-better-sqlite3": "^7.8.0",
+    "@prisma/client": "^7.8.0",
+    "better-sqlite3": "^12",
+    "clsx": "^2.1.1",
+    "cytoscape": "^3.30.4",
+    "cytoscape-cose-bilkent": "^4.1.0",
+    "next": "^16.2.6",
+    "prisma": "^7.8.0",
+    "react": "^19.2.6",
+    "react-cytoscapejs": "^2.0.0",
+    "react-dom": "^19.2.6",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.0",
+    "@types/node": "^25.8.0",
+    "@types/react": "^19.2.14",
+    "@types/react-cytoscapejs": "^1.2.5",
+    "@types/react-dom": "^19.2.3",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^16.2.6",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^4.3.0",
+    "tsx": "^4.19.2",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.13",
+    "vitest": "^4.1.6"
+  }
+}

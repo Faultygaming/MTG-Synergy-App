@@ -1,0 +1,68 @@
+# docker-compose for a LAN Linux server deployment.
+#
+# Pulls the latest image from GHCR, persists SQLite to a host volume, and
+# runs Watchtower alongside so the server auto-pulls when a new image
+# digest appears (default: every 5 minutes).
+#
+# Quick start on the LAN host:
+#   1. mkdir -p /opt/mtg-synergy && cd /opt/mtg-synergy
+#   2. copy this file there
+#   3. (private repo only) docker login ghcr.io  # PAT with read:packages
+#   4. docker compose up -d
+#   5. open http://<lan-host>:3000
+#
+# Versioning model:
+#   - Following `latest` (default) → auto-updates on every push to main.
+#   - Following `v1.2.3` (pinned)  → no auto-updates; bump the tag yourself.
+#   - Following `v1`               → tracks the latest 1.x release.
+#
+# To switch channels, edit the image tag below and run `docker compose up -d`.
+
+services:
+  app:
+    image: ghcr.io/faultygaming/mtg-synergy-app:latest
+    container_name: mtg-synergy
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      # SQLite DB + any `pnpm ingest` downloads survive container upgrades.
+      - mtg-synergy-data:/app/data
+    environment:
+      # Override DATABASE_URL only if you mount a different path.
+      # DATABASE_URL: "file:/app/data/synergy.db"
+      SCRYFALL_USER_AGENT: "MTGSynergyMap/0.1 (lan-host)"
+    labels:
+      # Watchtower opt-in. Remove this label to pin the container to a
+      # specific image and skip auto-updates.
+      com.centurylinklabs.watchtower.enable: "true"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: mtg-synergy-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      # Only update containers that opted in via the label above.
+      WATCHTOWER_LABEL_ENABLE: "true"
+      # Poll every 5 minutes; tune via WATCHTOWER_POLL_INTERVAL (seconds).
+      WATCHTOWER_POLL_INTERVAL: "300"
+      # Remove old images after a successful upgrade.
+      WATCHTOWER_CLEANUP: "true"
+      # Stop a container gracefully (SIGTERM) before replacing it.
+      WATCHTOWER_INCLUDE_STOPPED: "false"
+      WATCHTOWER_TIMEOUT: "30s"
+      # Uncomment if your GHCR image is private — drop a PAT here.
+      # REPO_USER: "<github-username>"
+      # REPO_PASS: "<github-PAT-with-read:packages>"
+
+volumes:
+  mtg-synergy-data:
+    name: mtg-synergy-data

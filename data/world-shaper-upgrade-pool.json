@@ -1,0 +1,26 @@
+{
+  "_comment": "Cards Paige Smith recommended for upgrading the World Shaper (Hearthhull, the Worldseed / BRG) commander precon. Sourced from https://www.coolstuffinc.com/a/paigesmith-08202025-upgrading-the-world-shaper-commander-precon . Run `pnpm tsx scripts/seed-upgrade-pool.ts` after `pnpm ingest` (or with internet access) to materialize these into the DB as a candidate pool.",
+  "commander": "Hearthhull, the Worldseed",
+  "format": "commander",
+  "color_identity": ["B", "R", "G"],
+  "cards": [
+    "Exploration",
+    "Burgeoning",
+    "Spelunking",
+    "Case of the Locked Hothouse",
+    "Orcish Lumberjack",
+    "Sylvan Safekeeper",
+    "Ramunap Excavator",
+    "Ancient Greenwarden",
+    "Icetill Explorer",
+    "Perennial Behemoth",
+    "Life from the Loam",
+    "Strip Mine",
+    "Wasteland",
+    "Demolition Field",
+    "Ghost Quarter",
+    "Zuran Orb",
+    "Scute Swarm",
+    "Lord Windgrace"
+  ]
+}
