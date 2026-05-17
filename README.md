@@ -166,6 +166,70 @@ This calls Moxfield's public v3 deck API. Note: in **sandboxed environments
 that restrict outbound HTTP** (including Claude Code remote execution),
 Moxfield's API host may be blocked; locally it works fine.
 
+## Deploying to a LAN Linux server with Docker
+
+The repo ships a **single multi-arch image** (`linux/amd64` + `linux/arm64`)
+published to GHCR on every push to `main` and every `v*.*.*` git tag.
+
+### One-time setup on the host
+
+```bash
+mkdir -p /opt/mtg-synergy && cd /opt/mtg-synergy
+curl -O https://raw.githubusercontent.com/Faultygaming/MTG-Synergy-App/main/docker-compose.yml
+# (private GHCR image only) docker login ghcr.io   # PAT with read:packages
+docker compose up -d
+# open http://<lan-host>:3000
+```
+
+The compose file mounts a named volume (`mtg-synergy-data`) at `/app/data`
+inside the container so the SQLite DB survives upgrades.
+
+### Auto-updates
+
+`docker-compose.yml` runs **Watchtower** alongside the app. By default it
+polls GHCR every 5 minutes; when the digest of `:latest` changes,
+Watchtower pulls and restarts the app gracefully. Opt-in is per-container
+via the `com.centurylinklabs.watchtower.enable=true` label (already set
+on the `app` service).
+
+### Versioning
+
+| Tag in compose | Behavior |
+|---|---|
+| `:latest` (default)   | Auto-updates on every push to `main` |
+| `:v1` / `:v1.2`        | Tracks the latest 1.x / 1.2.x release; predictable |
+| `:v1.2.3`              | Pinned; never updates until you change the tag |
+
+Cut a release: `git tag v0.2.0 && git push origin v0.2.0`. The `release`
+workflow builds the image and pushes `v0.2.0`, `0.2.0`, `0.2`, `0`, and
+moves `latest`.
+
+### Confirming what's running
+
+```bash
+curl http://<lan-host>:3000/api/health
+# {"status":"ok","version":"v0.2.0","commit":"abc123…","builtAt":"…"}
+```
+
+The container also exposes a Docker `HEALTHCHECK` on the same endpoint;
+`docker ps` shows `(healthy)` when the SQLite schema is initialized and
+the server is responding.
+
+### First boot
+
+The container runs `prisma db push` against `/app/data/synergy.db` at
+startup. On the first boot the DB is empty — visit `/deck/new` and paste
+your list to populate it via the Scryfall API. For a full candidate
+pool, exec into the container and run:
+
+```bash
+docker exec -it mtg-synergy sh
+node node_modules/tsx/dist/cli.mjs scripts/ingest-scryfall.ts
+node node_modules/tsx/dist/cli.mjs scripts/ingest-oracle-tags.ts
+```
+
+(`tsx` is a runtime dep so it's already installed in the image.)
+
 ## Roadmap
 
 - [ ] Scryfall oracle tags (`otag:`) as a first-class keyword source

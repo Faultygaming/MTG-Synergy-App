@@ -1,0 +1,36 @@
+# Lightweight CI: typecheck, lint, and tests on every PR and push. Keeps
+# the release workflow (which builds + pushes images) fast by running
+# correctness checks here instead.
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.3
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm prisma generate
+
+      - run: pnpm typecheck
+
+      - run: pnpm lint
+
+      - run: pnpm test

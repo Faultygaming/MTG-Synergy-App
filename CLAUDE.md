@@ -265,6 +265,43 @@ sidebar suggestions are limited to whatever's been ingested.
   should reuse `lib/scryfall.ts` and `sleep()` between batched calls.
   Identify the client via `SCRYFALL_USER_AGENT`.
 
+## Docker deployment
+
+Single multi-arch image published to GHCR by `.github/workflows/release.yml`
+on every push to `main` and on every `v*.*.*` git tag. Watch out for
+these things when changing anything Docker-related:
+
+- **node-linker**: the Dockerfile sets `npm_config_node_linker=hoisted`
+  in both deps and builder stages, forcing pnpm to use npm-style flat
+  layout INSIDE Docker only. Local dev still uses pnpm's default
+  isolated mode. Without hoisted layout, the inter-stage
+  `COPY /app/node_modules` produces dangling symlinks into `.pnpm/`.
+- **`prisma` is a runtime dependency, not a devDep.** It must be
+  installed in the production prune because the container's entrypoint
+  invokes `prisma db push` at startup to initialize the SQLite schema.
+  Don't move it back to devDeps.
+- **Next + Prisma**: `next.config.mjs` lists `@prisma/client` and
+  `prisma` in `experimental.serverComponentsExternalPackages`. Without
+  this, Next's bundler tries to inline Prisma's query engine binary
+  and breaks at runtime. If you add new server-side libs with native
+  bindings (better-sqlite3, sharp, etc.), add them here too.
+- **Health endpoint** at `src/app/api/health/route.ts` must stay
+  `export const dynamic = "force-dynamic"`. Without it Next prerenders
+  the response at build time, baking in a (possibly stale) DB ping
+  result and defeating the probe.
+- **`/app/data` volume**: SQLite lives at `/app/data/synergy.db`. Any
+  schema change must remain non-destructive (no `--accept-data-loss`)
+  so the entrypoint's `prisma db push` doesn't trash user data on
+  upgrade.
+
+GHCR image tags written by the release workflow:
+`latest` (main), `vX.Y.Z` / `X.Y.Z` / `X.Y` / `X` (semver tags),
+`sha-<short>` (every build).
+
+Auto-update on the LAN host is handled by Watchtower in
+`docker-compose.yml`; containers opt in via the
+`com.centurylinklabs.watchtower.enable=true` label.
+
 ## v2 / roadmap notes (relevant context for design decisions)
 
 - **Scryfall oracle tags** (`otag:`, `function:`) are the highest-value
