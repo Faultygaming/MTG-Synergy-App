@@ -24,7 +24,11 @@ services:
     container_name: mtg-synergy
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      # Host port is overridable via APP_PORT (set it in the shell or a
+      # .env file next to this compose file). Default 3030 because 3000
+      # is often taken by other Node-ish services. The container ALWAYS
+      # listens on 3000 internally — only the host side moves.
+      - "${APP_PORT:-3030}:3000"
     volumes:
       # SQLite DB + any `pnpm ingest` downloads survive container upgrades.
       - mtg-synergy-data:/app/data
