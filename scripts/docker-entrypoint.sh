@@ -22,11 +22,15 @@ DB_PATH="${RAW_DB#file:}"
 mkdir -p "$(dirname "$DB_PATH")"
 
 echo "[entrypoint] applying schema to ${RAW_DB}"
-# Prisma 7 reads the URL from prisma.config.ts (not schema.prisma), which
-# is why we copy that file into the runtime image.
-node /app/node_modules/prisma/build/index.js db push \
-  --skip-generate \
-  --accept-data-loss=false
+# Prisma 7 simplified the `db push` CLI: --skip-generate was removed
+# (regeneration is decided automatically), and --accept-data-loss is now
+# a flag-only switch with absence = refuse. So this call:
+#   - reads DATABASE_URL via prisma.config.ts
+#   - applies the schema non-destructively (would error if it required
+#     dropping a column / data)
+#   - skips re-generation because the client is already present from the
+#     build stage's `prisma generate`
+node /app/node_modules/prisma/build/index.js db push
 
 echo "[entrypoint] starting ${APP_VERSION:-dev} (${APP_COMMIT:-unknown})"
 exec "$@"
