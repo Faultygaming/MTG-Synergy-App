@@ -1,6 +1,29 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* Tailwind v4 — single import replaces the @tailwind directives. */
+@import "tailwindcss";
+
+/* Project design tokens. In v4 these are declared as CSS custom properties
+ * inside @theme and Tailwind turns them into utility classes automatically:
+ *   --color-tier-gold  → bg-tier-gold, text-tier-gold, ring-tier-gold, ...
+ *   --shadow-tier-gold → shadow-tier-gold
+ *
+ * Keep names in lower-kebab so the generated utilities are predictable. */
+@theme {
+  --color-tier-gold: #d4af37;
+  --color-tier-silver: #c0c0c0;
+  --color-tier-bronze: #cd7f32;
+
+  --color-ink: #0e0e10;
+  --color-ink-soft: #1a1a1d;
+  --color-ink-line: #2a2a30;
+
+  --shadow-tier-gold: 0 0 0 2px #d4af37, 0 0 16px rgba(212, 175, 55, 0.45);
+  --shadow-tier-silver: 0 0 0 2px #c0c0c0, 0 0 14px rgba(192, 192, 192, 0.4);
+  --shadow-tier-bronze: 0 0 0 2px #cd7f32, 0 0 12px rgba(205, 127, 50, 0.4);
+}
+
+/* In v4 the layer scan defaults skip files outside the project root.
+ * Explicit @source pins keep custom roots discoverable; we don't need any
+ * for this single-package repo (the default `./src/**` is picked up). */
 
 :root {
   color-scheme: dark;
@@ -9,7 +32,7 @@
 html,
 body {
   height: 100%;
-  background: #0e0e10;
+  background: var(--color-ink);
   color: #e7e5e4;
 }
 
@@ -30,5 +53,5 @@ body {
   background:
     radial-gradient(1200px 600px at 40% 30%, rgba(212, 175, 55, 0.04), transparent),
     radial-gradient(1000px 800px at 70% 70%, rgba(56, 189, 248, 0.04), transparent),
-    #0e0e10;
+    var(--color-ink);
 }

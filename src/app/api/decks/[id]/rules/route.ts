@@ -24,8 +24,11 @@ const RulesConfigSchema = z.object({
 // against the new severities. Returns the freshly-computed violation list.
 export async function PATCH(
   req: Request,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
+  // Next 16 made route handler params async — must await before use.
+  const { id } = await params;
+
   let body: z.infer<typeof RulesConfigSchema>;
   try {
     body = RulesConfigSchema.parse(await req.json());
@@ -37,12 +40,13 @@ export async function PATCH(
   }
 
   const existing = await prisma.deck.findUnique({
-    where: { id: params.id },
+    where: { id },
     include: { cards: { include: { card: true } } },
   });
   if (!existing) {
     return NextResponse.json({ error: "Deck not found" }, { status: 404 });
   }
+  const deckId = id;
 
   const oldConfig: CommanderRulesConfig = {
     ...DEFAULT_CONFIG,
@@ -81,7 +85,7 @@ export async function PATCH(
   );
 
   await prisma.deck.update({
-    where: { id: params.id },
+    where: { id: deckId },
     data: {
       rulesConfigJson: JSON.stringify(config),
       violationsJson: JSON.stringify(violations),

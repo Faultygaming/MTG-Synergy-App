@@ -30,7 +30,7 @@
 # ──────────────────────────────────────────────────────────────────────
 # deps: install pnpm deps with the project's preinstall guard
 # ──────────────────────────────────────────────────────────────────────
-FROM node:22-alpine AS deps
+FROM node:22-bookworm-slim AS deps
 RUN corepack enable && corepack prepare pnpm@9.12.3 --activate
 WORKDIR /app
 
@@ -48,7 +48,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
 # ──────────────────────────────────────────────────────────────────────
 # builder: prisma generate + next build (standalone), then prune devDeps
 # ──────────────────────────────────────────────────────────────────────
-FROM node:22-alpine AS builder
+FROM node:22-bookworm-slim AS builder
 RUN corepack enable && corepack prepare pnpm@9.12.3 --activate
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1 \
@@ -71,12 +71,17 @@ RUN pnpm prune --prod
 # ──────────────────────────────────────────────────────────────────────
 # runner: minimal runtime
 # ──────────────────────────────────────────────────────────────────────
-FROM node:22-alpine AS runner
+FROM node:22-bookworm-slim AS runner
 WORKDIR /app
 
-# tini: PID 1 + signal handling. openssl + libstdc++: required by Prisma's
-# query engine binaries on Alpine.
-RUN apk add --no-cache tini openssl libstdc++
+# tini: PID 1 + signal handling. ca-certificates: outbound HTTPS to
+# Scryfall + GHCR. wget: used by HEALTHCHECK. Switched away from Alpine
+# because better-sqlite3 (Prisma 7's SQLite driver adapter dependency)
+# ships prebuilt glibc binaries only — Alpine's musl would require
+# building from source.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tini ca-certificates wget \
+    && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
@@ -92,7 +97,9 @@ ENV APP_VERSION=${APP_VERSION} \
     APP_COMMIT=${APP_COMMIT} \
     APP_BUILT_AT=${APP_BUILT_AT}
 
-RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001 -G nodejs
+# Debian-style user creation (the Alpine `addgroup -S` flags don't apply here).
+RUN groupadd --system --gid 1001 nodejs \
+    && useradd --system --uid 1001 --gid nodejs --no-create-home --shell /usr/sbin/nologin nextjs
 
 # Next.js standalone bundle: provides /app/server.js + a minimal traced
 # /app/node_modules suitable for Next's runtime.
@@ -107,8 +114,9 @@ COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 # package is a real directory, not a symlink to .pnpm/.
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 
-# Prisma schema for `db push` at startup.
+# Prisma schema + config for `db push` at startup.
 COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
+COPY --from=builder --chown=nextjs:nodejs /app/prisma.config.ts ./prisma.config.ts
 
 # Persistent SQLite + downloads location. Declared as a VOLUME so an
 # operator who forgets to mount one still gets a stable named volume.
@@ -131,5 +139,5 @@ LABEL org.opencontainers.image.title="MTG Synergy Map" \
       org.opencontainers.image.source="https://github.com/Faultygaming/MTG-Synergy-App" \
       org.opencontainers.image.licenses="UNLICENSED"
 
-ENTRYPOINT ["/sbin/tini", "--", "/app/docker-entrypoint.sh"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/app/docker-entrypoint.sh"]
 CMD ["node", "server.js"]

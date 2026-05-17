@@ -265,6 +265,39 @@ sidebar suggestions are limited to whatever's been ingested.
   should reuse `lib/scryfall.ts` and `sleep()` between batched calls.
   Identify the client via `SCRYFALL_USER_AGENT`.
 
+## Stack versions (latest-stable as of May 2026)
+
+Major-version pins worth knowing:
+
+| Lib              | Version | Notes |
+|------------------|---------|-------|
+| Next.js          | 16.x    | App Router; **`params` is now `Promise<…>`** in dynamic routes; `serverComponentsExternalPackages` renamed to `serverExternalPackages`; `next lint` removed (use `eslint .` against the flat config). |
+| React            | 19.x    | Stable. No code changes needed beyond `@types/react@19`. |
+| Prisma           | 7.x     | **`url` removed from `schema.prisma`** — now in `prisma.config.ts`. Runtime requires a driver adapter: see `src/lib/db.ts` which wires `@prisma/adapter-better-sqlite3`. The CLI reads URL from `prisma.config.ts`. |
+| Tailwind CSS     | 4.x     | **No `tailwind.config.ts`** — design tokens live in CSS `@theme { ... }` directives in `src/app/globals.css`. PostCSS plugin renamed to `@tailwindcss/postcss`. Autoprefixer no longer needed. |
+| Zod              | 4.x     | Current usage is compatible — `z.union`, `z.object`, `z.enum`, `z.literal`. |
+| Vitest           | 4.x     | Bench API used in `*.bench.ts` is experimental — pin Vitest before relying on it. |
+| ESLint           | 9.x     | Flat config at `eslint.config.mjs`; `eslint-config-next@16` re-exports flat-compatible configs. Pinned at 9 because 10 isn't yet supported by eslint-config-next's transitive plugins. |
+| TypeScript       | 6.x     | No new issues surfaced. |
+
+## Performance: synergy hot path
+
+Benchmarks (Vitest bench) live next to the code in `*.bench.ts`. Run
+with `pnpm vitest bench`. The two paths worth tracking:
+
+- **`rankCandidates(candidates, deck)`** — runs on every deck-page render
+  against the candidate pool (capped at 2000). After the May 2026
+  optimization (single-pass scoring + hoisted deck-keyword Set), this is
+  ~3.0 ms at 2000 candidates on a developer laptop. Don't regress this:
+  the previous naive version was 23 ms, visibly affecting TTFB.
+- **`extractKeywords(card)`** — runs at ingest time. ~4 µs for a light
+  card, ~11 µs worst-case. Full Scryfall corpus (~30 k cards) extracts
+  in ~250 ms total — negligible vs the network time for the bulk
+  download.
+
+If you touch `src/lib/synergy/score.ts` or `keywords.ts`, re-run
+`pnpm vitest bench src/lib/synergy/` and check the delta.
+
 ## Docker deployment
 
 Single multi-arch image published to GHCR by `.github/workflows/release.yml`

@@ -1,13 +1,16 @@
 // Schema for MTG Synergy Map.
 // SQLite for local-first dev; swap provider + DATABASE_URL for Postgres later.
 
+// Prisma 7 moved the `url` out of schema files; see prisma.config.ts for
+// the migrate-time datasource URL and src/lib/db.ts for the runtime adapter.
+// `previewFeatures = ["driverAdapters"]` is no longer required — driver
+// adapters became GA in 7.x.
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "sqlite"
-  url      = env("DATABASE_URL")
 }
 
 // One row per unique oracle card (a "card" across all printings).

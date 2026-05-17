@@ -54,10 +54,12 @@ function rowToLegality(r: CardRow): CommanderLegalityCard {
 export default async function DeckPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
+  // Next 16 made dynamic route params async — must await before use.
+  const { id } = await params;
   const deck = await prisma.deck.findUnique({
-    where: { id: params.id },
+    where: { id },
     include: {
       cards: { include: { card: true } },
     },

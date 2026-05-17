@@ -16,10 +16,14 @@
 #                  that can't be applied non-destructively.
 set -eu
 
-DB_DIR="$(dirname "${DATABASE_URL#file:}")"
-mkdir -p "$DB_DIR"
+# Strip the optional file: prefix so we can mkdir the directory.
+RAW_DB="${DATABASE_URL:-file:./data/synergy.db}"
+DB_PATH="${RAW_DB#file:}"
+mkdir -p "$(dirname "$DB_PATH")"
 
-echo "[entrypoint] applying schema to ${DATABASE_URL}"
+echo "[entrypoint] applying schema to ${RAW_DB}"
+# Prisma 7 reads the URL from prisma.config.ts (not schema.prisma), which
+# is why we copy that file into the runtime image.
 node /app/node_modules/prisma/build/index.js db push \
   --skip-generate \
   --accept-data-loss=false
