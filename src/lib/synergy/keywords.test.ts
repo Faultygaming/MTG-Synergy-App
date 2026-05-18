@@ -21,6 +21,28 @@ describe("subtypesFromTypeLine", () => {
   it("returns empty array when there's no subtype", () => {
     expect(subtypesFromTypeLine("Sorcery")).toEqual([]);
   });
+
+  // Plane / Phenomenon / Vanguard / etc. have UNIQUE NAMES as subtypes
+  // (e.g. "Plane — Zhalfir", "Vanguard — Selvala"). Those names create
+  // 1-card keyword entries that pollute the global histogram, so we
+  // strip the subtype list for these owner types. The card still
+  // contributes its supertype/type tokens (plane, phenomenon, …).
+  it("drops unique-name subtypes for Plane / Vanguard / Scheme", () => {
+    expect(subtypesFromTypeLine("Plane — Zhalfir")).toEqual([]);
+    expect(subtypesFromTypeLine("Phenomenon — Spatial Merging")).toEqual([]);
+    expect(subtypesFromTypeLine("Vanguard — Selvala")).toEqual([]);
+    expect(subtypesFromTypeLine("Scheme — All in Good Time")).toEqual([]);
+    expect(subtypesFromTypeLine("Dungeon — Lost Mine of Phandelver")).toEqual([]);
+    expect(subtypesFromTypeLine("Conspiracy — Hidden Agenda")).toEqual([]);
+  });
+
+  // Planeswalker subtypes are character names ("Calix", "Dakkon",
+  // "Jeska", "Niko"). Same one-off-noise problem as plane names.
+  it("drops planeswalker character-name subtypes", () => {
+    expect(subtypesFromTypeLine("Legendary Planeswalker — Calix")).toEqual([]);
+    expect(subtypesFromTypeLine("Legendary Planeswalker — Jeska")).toEqual([]);
+    expect(subtypesFromTypeLine("Planeswalker — Dakkon")).toEqual([]);
+  });
 });
 
 describe("extractKeywords", () => {
@@ -84,6 +106,224 @@ describe("extractKeywords", () => {
       produced_mana: [],
     });
     expect(kws).toContain("land-recursion");
+  });
+
+  // Audit (May 2026) showed these basic-land tutors had ZERO keywords.
+  // The previous ramp regex required "a/an" before the land noun, which
+  // missed "up to two basic land cards" and typed-land tutors.
+  it("tags Cultivate (up to two basic lands) with ramp", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Sorcery",
+      oracle_text:
+        "Search your library for up to two basic land cards, reveal those cards, put one onto the battlefield tapped and the other into your hand, then shuffle.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("ramp");
+  });
+
+  it("tags Skyshroud Claim (typed land tutor) with ramp", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Sorcery",
+      oracle_text:
+        "Search your library for up to two Forest cards, put them onto the battlefield, then shuffle.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("ramp");
+  });
+
+  it("tags World Shaper (any-number land tutor) with ramp", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Creature — Elemental",
+      oracle_text:
+        "When World Shaper dies, you may shuffle your graveyard into your library. When you do, search your library for any number of land cards and put them onto the battlefield tapped.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("ramp");
+    expect(kws).toContain("death-trigger");
+  });
+
+  it("tags Splendid Reclamation (return all lands) with land-recursion", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Sorcery",
+      oracle_text:
+        "Return all land cards from your graveyard to the battlefield tapped.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("land-recursion");
+  });
+
+  it("tags Aftermath Analyst (return all lands) with land-recursion", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Creature — Human Druid",
+      oracle_text:
+        "{2}{G}, Sacrifice Aftermath Analyst: Return all land cards from your graveyard to the battlefield tapped.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("land-recursion");
+  });
+
+  // mana-rock / mana-dork are now context-aware: type_line decides.
+  it("tags Sol Ring as mana-rock (artifact), not basic lands", () => {
+    const sol = extractKeywords({
+      keywords: [],
+      type_line: "Artifact",
+      oracle_text: "{T}: Add {C}{C}.",
+      produced_mana: ["C"],
+    });
+    expect(sol).toContain("mana-rock");
+    expect(sol).not.toContain("mana-dork");
+
+    const forest = extractKeywords({
+      keywords: [],
+      type_line: "Basic Land — Forest",
+      oracle_text: "{T}: Add {G}.",
+      produced_mana: ["G"],
+    });
+    expect(forest).not.toContain("mana-rock");
+    expect(forest).not.toContain("mana-dork");
+  });
+
+  it("tags Llanowar Elves as mana-dork (creature), not mana-rock", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Creature — Elf Druid",
+      oracle_text: "{T}: Add {G}.",
+      produced_mana: ["G"],
+    });
+    expect(kws).toContain("mana-dork");
+    expect(kws).not.toContain("mana-rock");
+  });
+
+  // Static Orb: the audit showed it returned zero archetype keywords
+  // because stax-tap-untap only matched "don't untap" / "doesn't untap
+  // during", missing "can't untap more than".
+  it("tags Static Orb with stax-tap-untap", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Artifact",
+      oracle_text:
+        "As long as Static Orb is untapped, players can't untap more than two permanents during their untap steps.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("stax-tap-untap");
+  });
+
+  // Real Dark Ritual's oracle text is "Add {B}{B}{B}." — the previous
+  // ritual regex only matched the paraphrased "three mana" wording.
+  it("tags real Dark Ritual ({B}{B}{B} form) with ritual", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Instant",
+      oracle_text: "Add {B}{B}{B}.",
+      produced_mana: ["B"],
+    });
+    expect(kws).toContain("ritual");
+  });
+
+  // Blasphemous Act has cost reduction that depended on board state,
+  // not tribe. The renamed "cost-reduction" keyword keeps catching it
+  // without the misleading "tribal-" prefix.
+  it("renames tribal-cost-reduction → cost-reduction (no false tribal label)", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Sorcery",
+      oracle_text:
+        "This spell costs {1} less to cast for each creature on the battlefield. Destroy all creatures.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("cost-reduction");
+    expect(kws).not.toContain("tribal-cost-reduction");
+  });
+
+  // X-damage and "deals damage equal to ..." spells were missed by the
+  // old damage-removal regex (literal-digit only).
+  it("tags Worldsoul's Rage (X-damage) with damage-removal", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Sorcery",
+      oracle_text:
+        "Worldsoul's Rage deals X damage to any target. Put up to X land cards from your hand and/or graveyard onto the battlefield tapped.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("damage-removal");
+  });
+
+  it("tags Torrent of Fire ('deals damage equal to') with damage-removal", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Sorcery",
+      oracle_text:
+        "Torrent of Fire deals damage to any target equal to the greatest mana value among permanents you control.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("damage-removal");
+  });
+
+  // "Destroy each ..." and damage-based sweepers were missed by the
+  // old board-wipe regex.
+  it("tags Gaze of Granite ('destroy each nonland permanent') with board-wipe", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Sorcery",
+      oracle_text: "Destroy each nonland permanent with mana value X or less.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("board-wipe");
+  });
+
+  it("tags Blasphemous Act (damage to each creature) with board-wipe", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Sorcery",
+      oracle_text:
+        "This spell costs {1} less to cast for each creature on the battlefield. Blasphemous Act deals 13 damage to each creature.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("board-wipe");
+  });
+
+  // Multi-color lands (Command Tower, Cinder Glade, triomes, fetches
+  // that produce two colors) used to be falsely tagged "mana-rock".
+  // After context-aware mana-rock, they need a positive label —
+  // "mana-fixing" — so they still surface as load-bearing deck pieces.
+  it("tags Cinder Glade (dual land) with mana-fixing, not mana-rock", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Land — Mountain Forest",
+      oracle_text:
+        "({T}: Add {R} or {G}.) This land enters tapped unless you control two or more basic lands.",
+      produced_mana: ["R", "G"],
+    });
+    expect(kws).toContain("mana-fixing");
+    expect(kws).not.toContain("mana-rock");
+  });
+
+  it("tags Command Tower (5-color land) with mana-fixing", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Land",
+      oracle_text:
+        "{T}: Add one mana of any color in your commander's color identity.",
+      produced_mana: ["W", "U", "B", "R", "G"],
+    });
+    expect(kws).toContain("mana-fixing");
+    expect(kws).not.toContain("mana-rock");
+  });
+
+  it("does NOT tag basic Forest with mana-fixing (single color)", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Basic Land — Forest",
+      oracle_text: "({T}: Add {G}.)",
+      produced_mana: ["G"],
+    });
+    expect(kws).not.toContain("mana-fixing");
+    expect(kws).not.toContain("mana-rock");
   });
 
   it("tags Exploration with extra-land-drops", () => {

@@ -20,6 +20,28 @@ export function normalizeKeyword(raw: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+// Type lines where the part after the em-dash is a unique proper name
+// (the plane "Zhalfir", the scheme "All in Good Time", the vanguard
+// "Selvala") rather than a synergy-bearing subtype. Extracting these as
+// keywords creates one-off noise in the global keyword index — they
+// appear on a single card and nobody is building a "Zhalfir" deck.
+// Stripping them at the extraction layer keeps the histogram clean.
+const TYPELINE_NAMED_SUBTYPE_OWNERS = new Set([
+  "plane",
+  "phenomenon",
+  "conspiracy",
+  "scheme",
+  "dungeon",
+  "vanguard",
+  "hero",
+  "card", // very old "Card — Foo" relics
+  // Planeswalker subtypes are character names ("Calix", "Dakkon",
+  // "Jeska", …). With ~1 card per name they create one-off noise the
+  // same way plane names do. Superfriends synergy is still captured by
+  // the "planeswalker" type token harvested from BEFORE the em-dash.
+  "planeswalker",
+]);
+
 // Subtypes after the em-dash in a type_line, e.g.
 //   "Legendary Creature — Human Wizard" → ["human", "wizard"]
 // "Creature — Goblin" → ["goblin"]
@@ -27,6 +49,13 @@ export function subtypesFromTypeLine(typeLine: string): string[] {
   // Scryfall uses either em-dash (—) or hyphen-minus depending on locale.
   const split = typeLine.split(/[—\-]/);
   if (split.length < 2) return [];
+
+  // Skip subtypes for "named-subtype" types — see TYPELINE_NAMED_SUBTYPE_OWNERS.
+  const beforeDash = split[0].toLowerCase();
+  for (const owner of TYPELINE_NAMED_SUBTYPE_OWNERS) {
+    if (beforeDash.includes(owner)) return [];
+  }
+
   const tail = split.slice(1).join(" ").trim();
   return tail.split(/\s+/).filter(Boolean).map(normalizeKeyword);
 }
@@ -83,11 +112,22 @@ const ORACLE_TEXT_PATTERNS: Array<{ keyword: string; pattern: RegExp }> = [
   { keyword: "tutor-enchantment", pattern: /search your library for an? (?:[^.]{0,30}?\s+)?enchantment\b/i },
 
   // ── Ramp / mana production ────────────────────────────────────────
-  { keyword: "ramp",              pattern: /search your library for (?:a |an )?(?:basic )?land/i },
+  // Ramp catches basic-land tutors AND typed-land tutors. "[^.]{0,80}?"
+  // is bounded so we don't cross sentence boundaries; the alternation
+  // covers "a basic land", "up to two basic land cards", "any number of
+  // land cards" (World Shaper), and "a Plains, Island, Swamp, Mountain,
+  // or Forest card" (Skyshroud Claim, Three Visits, etc.).
+  { keyword: "ramp",              pattern: /search your library for [^.]{0,80}?(?:\bland\b|\bforest\b|\bisland\b|\bplains\b|\bmountain\b|\bswamp\b|\bgate\b)/i },
   { keyword: "extra-land-drops",  pattern: /play (?:an? |two )?additional lands?/i },
-  { keyword: "mana-rock",         pattern: /\{T\}:\s*add(?:\s+one\s+mana|\s+\{)/i },
+  // Mana-rock / mana-dork are handled as context-aware extractions in
+  // extractKeywords() — they need the type_line to disambiguate
+  // (otherwise every basic Forest gets flagged as a "mana-rock").
   { keyword: "mana-doubler",      pattern: /(?:adds? an additional|that mana,?\s+(?:he|she|they)?\s*adds? twice|double the amount of mana)/i },
-  { keyword: "ritual",            pattern: /add\s+(?:three|four|five|six)\s+mana\b/i },
+  // Ritual: matches "Add three mana of any one color" (paraphrased
+  // tests) plus the real-Magic three-or-more pip mana symbol form
+  // ("Add {B}{B}{B}." / "Add {R}{R}{R}{R}.") that Dark Ritual,
+  // Pyretic Ritual, Seething Song, et al. actually use.
+  { keyword: "ritual",            pattern: /add\s+(?:three|four|five|six|seven)\s+mana\b|add\s+(?:\{[wubrgc]\}\s*){3,}/i },
 
   // ── Tokens by type ────────────────────────────────────────────────
   { keyword: "token-maker",       pattern: /create[s]?\s+(?:a|an|one|two|three|x)\s+[^.]*?token/i },
@@ -105,7 +145,11 @@ const ORACLE_TEXT_PATTERNS: Array<{ keyword: string; pattern: RegExp }> = [
 
   // ── Lands matter ──────────────────────────────────────────────────
   { keyword: "landfall",          pattern: /\blandfall\b|when(?:ever)?\s+[^.]*?land\s+(?:you control )?enters/i },
-  { keyword: "land-recursion",    pattern: /play\s+lands?(?:\s+cards?)?\s+from\s+(?:your\s+)?graveyard|return\s+(?:target\s+)?land(?:\s+card)?\s+from\s+(?:your\s+)?graveyard/i },
+  // Land recursion: "You may play lands from your graveyard" (Crucible
+  // / Ramunap Excavator), "Return target/all/each/any land card(s) from
+  // your graveyard" (Life from the Loam, Splendid Reclamation,
+  // Aftermath Analyst, World Shaper).
+  { keyword: "land-recursion",    pattern: /play\s+lands?(?:\s+cards?)?\s+from\s+(?:your\s+)?graveyard|return\s+[^.]{0,40}?lands?(?:\s+cards?)?\s+from\s+(?:your\s+)?graveyard/i },
   { keyword: "lands-matter",      pattern: /(?:number of lands you control|for each land|whenever a land)/i },
   { keyword: "land-sacrifice",    pattern: /sacrifice\s+a\s+land\b/i },
   { keyword: "retrace",           pattern: /\bretrace\b/i },
@@ -113,18 +157,34 @@ const ORACLE_TEXT_PATTERNS: Array<{ keyword: string; pattern: RegExp }> = [
   // ── Removal / interaction ─────────────────────────────────────────
   { keyword: "removal-targeted",  pattern: /destroy target|exile target (creature|permanent|nonland)/i },
   { keyword: "bounce",            pattern: /return\s+target\s+[^.]{1,40}?to\s+(?:its|their)\s+owner's\s+hand|return\s+target\s+[^.]{1,40}?to\s+your\s+hand/i },
-  { keyword: "board-wipe",        pattern: /destroy all|exile all/i },
+  // Board wipe: catches "Destroy all creatures" (Wrath), "Exile all
+  // multicolored permanents" (Ravnica at War), "Destroy each nonland
+  // permanent" (Gaze of Granite), and damage-based sweepers like
+  // Blasphemous Act ("deals 13 damage to each creature") and
+  // Planetary Annihilation ("deals 6 damage to each creature").
+  { keyword: "board-wipe",        pattern: /destroy all|exile all|destroy each [^.]{0,30}?(?:creature|permanent|nonland)|deals?\s+(?:\d+|x)\s+damage\s+to\s+each\s+(?:creature|player|opponent)/i },
   { keyword: "mass-artifact-removal", pattern: /destroy all artifacts|exile all artifacts/i },
   { keyword: "mass-enchantment-removal", pattern: /destroy all enchantments|exile all enchantments/i },
   { keyword: "edict",             pattern: /each\s+(?:player|opponent)\s+sacrifices\s+a\s+creature|target\s+(?:player|opponent)\s+sacrifices/i },
   { keyword: "fight",             pattern: /\bfights?\s+(?:another|target)\s+creature\b/i },
-  { keyword: "damage-removal",    pattern: /deals?\s+\d+\s+damage\s+to\s+(?:any target|target creature)/i },
+  // Damage-removal: previously required a literal digit ("deals 3
+  // damage to ..."), missing X-spells (Worldsoul's Rage, Banefire) and
+  // "deals damage to any target equal to ..." (Torrent of Fire). The
+  // amount segment is now optional and accepts \d+ / x / that much.
+  // We still require "any target" or "target ..." as the destination
+  // so combat-damage triggers ("whenever this creature deals damage to
+  // a player") don't false-fire.
+  { keyword: "damage-removal",    pattern: /deals?\s+(?:(?:\d+|x|that much)\s+)?damage\s+to\s+(?:any target|target)/i },
   { keyword: "counterspell",      pattern: /counter target/i },
   { keyword: "cant-be-countered", pattern: /can't be countered/i },
 
   // ── Stax / disruption ─────────────────────────────────────────────
   { keyword: "tax-effect",        pattern: /spells?\s+cost\s+\{\d\}?\s*more|spells?\s+(?:your\s+)?opponents?\s+(?:cast\s+)?cost\s+\{\d\}\s+more/i },
-  { keyword: "stax-tap-untap",    pattern: /don't untap|doesn't untap during/i },
+  // Stax tap/untap: covers Winter Orb / Stasis ("don't untap"),
+  // tap-on-upkeep effects ("doesn't untap during"), Static Orb-style
+  // limits ("players can't untap more than two"), and one-shot tappers
+  // ("tap all creatures").
+  { keyword: "stax-tap-untap",    pattern: /don't untap|doesn't untap during|can't untap more than|players? can't untap|tap all (?:creatures|lands|permanents)/i },
   { keyword: "cant-attack-block", pattern: /can't attack(?: you)?|can't block/i },
   { keyword: "pillow-fort",       pattern: /can't attack you|attacking you costs/i },
 
@@ -196,7 +256,13 @@ const ORACLE_TEXT_PATTERNS: Array<{ keyword: string; pattern: RegExp }> = [
   // ── Tribal / typal ────────────────────────────────────────────────
   { keyword: "tribal-lord",       pattern: /other\s+[^.]{1,30}?\s+(?:creatures|you control)\s+get\s+\+\d+\/\+\d+/i },
   { keyword: "changeling",        pattern: /\bchangeling\b/i },
-  { keyword: "tribal-cost-reduction", pattern: /this\s+spell\s+costs\s+\{\d\}\s+less/i },
+  // Generic spell cost reduction. The previous "tribal-cost-reduction"
+  // pattern matched Blasphemous Act ("costs {1} less for each creature
+  // on the battlefield"), so we widened it to "cost-reduction" and
+  // dropped the false-tribal label. True tribal cost reduction
+  // (Urza's Incubator, Heartstone) gets caught here too — UI/scoring
+  // can still discover the tribe via the tribe keyword on the same card.
+  { keyword: "cost-reduction",    pattern: /this\s+spell\s+costs\s+\{\d\}\s+less|spells?\s+you\s+cast\s+costs?\s+\{\d\}\s+less|\bcreature\s+spells?\s+(?:you\s+cast\s+)?costs?\s+\{\d\}\s+less/i },
 
   // ── Politics / multiplayer ────────────────────────────────────────
   { keyword: "monarch",           pattern: /\bbecomes? the monarch\b|you're the monarch/i },
@@ -286,11 +352,43 @@ export function extractKeywords(
     out.add(`produces-${normalizeKeyword(m)}`);
   }
 
+  // 4b. Mana fixing on lands. After the mana-rock fix, dual lands /
+  // tri-lands / Command Tower lose their (bogus) mana-rock tag and end
+  // up with NO archetype keyword — but they're load-bearing in any
+  // multi-color deck. A multi-color land is one with type "Land" and
+  // 2+ entries in produced_mana. Artifact mana fixers (Chromatic Lantern)
+  // are already covered by "mana-rock".
+  if (
+    /\bland\b/i.test(card.type_line ?? "") &&
+    (card.produced_mana?.length ?? 0) >= 2
+  ) {
+    out.add("mana-fixing");
+  }
+
   // 5. Regex pack over oracle text.
   const text = card.oracle_text ?? "";
   if (text) {
     for (const { keyword, pattern } of ORACLE_TEXT_PATTERNS) {
       if (pattern.test(text)) out.add(keyword);
+    }
+  }
+
+  // 5b. Context-aware mana producers. "{T}: Add {G}." on a Forest is
+  // not a "mana-rock" — it's a basic land. We bucket the tap-for-mana
+  // pattern by type_line:
+  //   - Artifact (not a land): mana-rock      (Sol Ring, Mana Crypt)
+  //   - Creature (not a land): mana-dork      (Llanowar Elves, Birds)
+  //   - Land:                  intentionally no keyword (handled by
+  //                            the land subtypes & "produces-X" tags)
+  // The pattern accepts a generic "Add one mana of any color" too
+  // (Birds of Paradise) — Add{ or Add\s+one\s+mana both qualify.
+  const TAP_FOR_MANA = /\{T\}:\s*add(?:\s+one\s+mana|\s+\{)/i;
+  if (TAP_FOR_MANA.test(text)) {
+    const typeLine = card.type_line ?? "";
+    const isLand = /\bland\b/i.test(typeLine);
+    if (!isLand) {
+      if (/\bartifact\b/i.test(typeLine)) out.add("mana-rock");
+      if (/\bcreature\b/i.test(typeLine)) out.add("mana-dork");
     }
   }
 
