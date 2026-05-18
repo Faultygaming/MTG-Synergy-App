@@ -65,6 +65,39 @@ describe("detectDeckThemes", () => {
     expect(themes.length).toBe(0);
   });
 
+  // The Hearthhull-deck false-positive: 12 token-makers existed in the
+  // deck (Hammer of Purphoros, Omnath, Rampaging Baloths — they all
+  // make tokens via landfall payoffs) but NO tokens-strategy payoffs
+  // (anthems, populate, doublers). Without role balance, "tokens"
+  // looked like a primary theme and falsely promoted Crucible of Fire
+  // (anthem) to gold. With role balance, tokens drops out.
+  it("requires BOTH roles present to qualify as a primary theme", () => {
+    const deck: DeckEntry[] = [
+      // 12 token-makers, no tokens payoffs
+      ...Array.from({ length: 12 }, (_, i) =>
+        entry(`Token Maker ${i}`, ["token-maker"]),
+      ),
+    ];
+    const themes = detectDeckThemes(deck);
+    const tokens = themes.find((t) => t.themeId === "tokens");
+    expect(tokens).toBeUndefined();
+  });
+
+  it("keeps a theme primary when both roles have at least one card", () => {
+    const deck: DeckEntry[] = [
+      entry("Token Maker 1", ["token-maker"]),
+      entry("Token Maker 2", ["token-maker"]),
+      entry("Token Maker 3", ["token-maker"]),
+      entry("Token Maker 4", ["token-maker"]),
+      entry("Anthem", ["anthem"]),
+    ];
+    const themes = detectDeckThemes(deck);
+    const tokens = themes.find((t) => t.themeId === "tokens");
+    expect(tokens).toBeDefined();
+    expect(tokens!.enablerCount).toBe(4);
+    expect(tokens!.payoffCount).toBe(1);
+  });
+
   it("multi-role cards count toward each role they satisfy", () => {
     // Mazirek-style: sacrifice-outlet (enabler) + +1/+1-counters (neutral)
     // in two different themes.
@@ -130,6 +163,45 @@ describe("scoreCandidateByThemes", () => {
     const matches = scoreCandidateByThemes(c, deckThemes);
     const lands = matches.find((m) => m.themeId === "lands-matter");
     expect(lands!.cardRole).toBe("payoff"); // payoff wins
+  });
+
+  // The Hearthhull-deck Crucible-as-keystone case: the deck has a
+  // HUGE lands-matter theme (60+ cards) that's balanced between
+  // enablers and payoffs. Closes-the-loop doesn't fire (neither side
+  // is sparse) but Crucible should still tier gold because it's a
+  // payoff for the deck's defining archetype.
+  it("STRONG signal for payoff in a heavy (≥20-card) primary theme, even when balanced", () => {
+    const deck: DeckEntry[] = [
+      // 10 ramp enablers + 4 land-sac enablers + 4 extra-drop enablers (18)
+      ...Array.from({ length: 10 }, (_, i) => entry(`Ramp ${i}`, ["ramp"])),
+      ...Array.from({ length: 4 }, (_, i) =>
+        entry(`Sac ${i}`, ["land-sacrifice"]),
+      ),
+      ...Array.from({ length: 4 }, (_, i) =>
+        entry(`Drop ${i}`, ["extra-land-drops"]),
+      ),
+      // 6 landfall payoffs + 4 land-recursion payoffs (10)
+      ...Array.from({ length: 6 }, (_, i) =>
+        entry(`Landfall ${i}`, ["landfall"]),
+      ),
+      ...Array.from({ length: 4 }, (_, i) =>
+        entry(`Recur ${i}`, ["land-recursion"]),
+      ),
+    ];
+    const deckThemes = detectDeckThemes(deck);
+    const lands = deckThemes.find((t) => t.themeId === "lands-matter");
+    expect(lands).toBeDefined();
+    expect(lands!.totalCount).toBeGreaterThanOrEqual(20);
+    // Balanced: neither closes-the-loop condition triggers
+    expect(lands!.enablerCount).toBeGreaterThanOrEqual(5);
+    expect(lands!.payoffCount).toBeGreaterThanOrEqual(3);
+
+    const crucible = card("Crucible of Worlds", ["land-recursion"]);
+    const matches = scoreCandidateByThemes(crucible, deckThemes);
+    const landsMatch = matches.find((m) => m.themeId === "lands-matter");
+    expect(landsMatch!.signal).toBe("strong");
+    expect(landsMatch!.rationale).toMatch(/built around/i);
+    expect(landsMatch!.rationale).toMatch(/high-impact/i);
   });
 
   it("returns empty array when card doesn't touch any deck theme", () => {

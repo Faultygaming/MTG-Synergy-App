@@ -11,6 +11,7 @@ import type {
 import type { DeckEntry } from "@/lib/types";
 import {
   classifyCard,
+  classifyCardByThemes,
   edgeTier as edgeTierFn,
   packForce,
   packPieCloud,
@@ -18,6 +19,7 @@ import {
   sizeFor as sizeForFn,
   subgroupKeyFor,
   ART_ASPECT,
+  type MapTheme,
   type MapTier,
   type MapTop,
 } from "@/lib/synergy/map";
@@ -58,6 +60,11 @@ function artCropFor(url: string | null | undefined): string {
 
 interface Props {
   entries: DeckEntry[];
+  // Deck's primary themes (computed server-side in deck/[id]/page.tsx).
+  // When present, node tier classification uses theme membership instead
+  // of raw top-3 keyword overlap, so the map's gold/silver/bronze ring
+  // colors match what the sidebar shows.
+  themes?: MapTheme[];
 }
 
 // Sizing + tier classification + edge derivation moved to
@@ -79,7 +86,7 @@ const EDGE_TIER_OPACITY: Record<1 | 2 | 3 | 4, number> = {
   4: 0.08,
 };
 
-export function SynergyMap({ entries }: Props) {
+export function SynergyMap({ entries, themes }: Props) {
   // UI toggles ------------------------------------------------------------
   // Default view is card-only; flip to add keyword nodes back in.
   const [showKeywords, setShowKeywords] = useState(false);
@@ -170,9 +177,16 @@ export function SynergyMap({ entries }: Props) {
 
     // Card nodes, sized by tier band + share count, positioned via
     // packPieCloud (one circular cloud, pie-sectors by tier, no overlap).
+    //
+    // Tier source: themes (when provided by the server) > raw top-3
+    // keywords (fallback). Switching to themes was the May-2026 design
+    // refactor; the keyword fallback is kept for the headless preview
+    // script which doesn't compute themes.
     const classified = entries.map((e) => ({
       entry: e,
-      ...classifyCard(e.card.keywords, top),
+      ...(themes && themes.length > 0
+        ? classifyCardByThemes(e.card.keywords, themes)
+        : classifyCard(e.card.keywords, top)),
     }));
     const sizes = classified.map((c) => {
       const width = sizeForFn(c.tier, c.shareCount);
@@ -321,7 +335,7 @@ export function SynergyMap({ entries }: Props) {
     }
 
     return els;
-  }, [entries, top, showKeywords, showQuaternary, layoutMode, excludeKeywords]);
+  }, [entries, top, themes, showKeywords, showQuaternary, layoutMode, excludeKeywords]);
 
   const stylesheet: StylesheetStyle[] = useMemo(
     () => [

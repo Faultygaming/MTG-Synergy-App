@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildMapElements,
+  classifyCardByThemes,
   packPieCloud,
   type MapCard,
   type MapTop,
@@ -157,5 +158,64 @@ describe("buildMapElements (smoke)", () => {
     expect(nodes.find((n) => n.id === "a")?.tier).toBe("gold");
     expect(nodes.find((n) => n.id === "b")?.tier).toBe("silver");
     expect(edges).toHaveLength(0); // they share nothing in top-3
+  });
+});
+
+describe("classifyCardByThemes", () => {
+  const landsMatter = {
+    themeId: "lands-matter",
+    totalCount: 60,
+    members: [
+      { keyword: "landfall", role: "payoff" as const },
+      { keyword: "land-recursion", role: "payoff" as const },
+      { keyword: "ramp", role: "enabler" as const },
+      { keyword: "mana-fixing", role: "neutral" as const },
+    ],
+  };
+  const smallTheme = {
+    themeId: "tokens",
+    totalCount: 10,
+    members: [
+      { keyword: "token-maker", role: "enabler" as const },
+      { keyword: "anthem", role: "payoff" as const },
+    ],
+  };
+
+  it("payoff in a heavy (≥20) theme → gold", () => {
+    expect(classifyCardByThemes(["land-recursion"], [landsMatter]).tier).toBe(
+      "gold",
+    );
+  });
+
+  it("payoff in a small theme → silver", () => {
+    expect(classifyCardByThemes(["anthem"], [smallTheme]).tier).toBe("silver");
+  });
+
+  it("enabler → bronze regardless of theme size", () => {
+    expect(classifyCardByThemes(["ramp"], [landsMatter]).tier).toBe("bronze");
+    expect(classifyCardByThemes(["token-maker"], [smallTheme]).tier).toBe(
+      "bronze",
+    );
+  });
+
+  it("neutral → bronze", () => {
+    expect(classifyCardByThemes(["mana-fixing"], [landsMatter]).tier).toBe(
+      "bronze",
+    );
+  });
+
+  it("no theme membership → none", () => {
+    expect(classifyCardByThemes(["counterspell"], [landsMatter]).tier).toBe(
+      "none",
+    );
+  });
+
+  it("keeps the BEST tier across multiple themes", () => {
+    expect(
+      classifyCardByThemes(
+        ["land-recursion", "token-maker"],
+        [landsMatter, smallTheme],
+      ).tier,
+    ).toBe("gold");
   });
 });

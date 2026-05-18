@@ -212,7 +212,12 @@ const ORACLE_TEXT_PATTERNS: Array<{ keyword: string; pattern: RegExp }> = [
 
   // ── Combat ────────────────────────────────────────────────────────
   { keyword: "pump-spell",        pattern: /gets?\s+\+\d+\/\+\d+\s+until\s+end\s+of\s+turn/i },
-  { keyword: "anthem",            pattern: /creatures you control get \+\d+\/\+\d+/i },
+  // Anthem: only fires on GENERIC "Creatures you control get +X/+X" —
+  // tribal anthems like Crucible of Fire ("Dragon creatures you control
+  // get +1/+1") shouldn't count, because they only buff one tribe and
+  // don't pay off a generic token strategy. Anchored to start-of-text,
+  // post-period, or "Other "/"All " (covers the few non-tribal forms).
+  { keyword: "anthem",            pattern: /(?:^|[.;]\s+|\bAll |\bOther )[Cc]reatures you control get \+\d+\/\+\d+/ },
   { keyword: "evasion-grant",     pattern: /can't be blocked|have(?:s)?\s+(?:flying|menace|trample|reach)\b/i },
   { keyword: "indestructible-grant", pattern: /gains?\s+indestructible|have\s+indestructible/i },
   { keyword: "protection-grant",  pattern: /gains?\s+hexproof|have\s+protection\s+from|gains?\s+protection\s+from/i },

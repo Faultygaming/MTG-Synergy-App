@@ -11,7 +11,9 @@ import { rankCandidates, topThreeKeywords } from "@/lib/synergy/score";
 import {
   detectDeckThemes,
   scoreDeckCardsForRemoval,
+  THEMES,
 } from "@/lib/synergy/themes";
+import type { MapTheme } from "@/lib/synergy/map";
 import { COMMON_KEYWORD_STOPLIST } from "@/lib/synergy/stoplist";
 import { DeckSidebar } from "@/components/DeckSidebar";
 import { SynergyMap } from "@/components/SynergyMap";
@@ -136,6 +138,17 @@ export default async function DeckPage({
   // but only 1 payoff — this closes the loop") instead of the older
   // raw keyword-overlap tier. See src/lib/synergy/themes.ts.
   const deckThemes = detectDeckThemes(entries);
+  // Project deck themes into the map's serializable shape. The map
+  // module is keyword-pure (no theme catalog dependency), so we hand
+  // it the resolved member-with-role lists per active theme.
+  const mapThemes: MapTheme[] = deckThemes.map((dt) => {
+    const cat = THEMES.find((t) => t.id === dt.themeId);
+    return {
+      themeId: dt.themeId,
+      members: cat?.members ?? [],
+      totalCount: dt.totalCount,
+    };
+  });
   const suggestions: SynergySuggestion[] = rankCandidates(
     candidates,
     entries,
@@ -237,7 +250,7 @@ export default async function DeckPage({
           </details>
         </header>
         <div className="relative min-h-0 flex-1">
-          <SynergyMap entries={entries} />
+          <SynergyMap entries={entries} themes={mapThemes} />
         </div>
       </section>
       <aside className="flex flex-col border-l border-ink-line bg-ink-soft">
