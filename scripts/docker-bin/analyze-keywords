@@ -1,0 +1,7 @@
+#!/bin/sh
+# Inside the container: audit keyword extraction coverage against every
+# Card row. Writes data/keyword-audit.txt with the coverage histogram,
+# per-keyword frequency table, sample of under-tagged cards, and mined
+# bigrams/trigrams from un-tagged oracle text. Read-only — does not
+# modify any Card rows.
+exec node /app/node_modules/tsx/dist/cli.mjs /app/scripts/analyze-keywords.ts "$@"

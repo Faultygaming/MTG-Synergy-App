@@ -136,6 +136,7 @@ COPY --chmod=755 scripts/docker-bin/seed /usr/local/bin/seed
 COPY --chmod=755 scripts/docker-bin/ingest /usr/local/bin/ingest
 COPY --chmod=755 scripts/docker-bin/ingest-tags /usr/local/bin/ingest-tags
 COPY --chmod=755 scripts/docker-bin/reextract-keywords /usr/local/bin/reextract-keywords
+COPY --chmod=755 scripts/docker-bin/analyze-keywords /usr/local/bin/analyze-keywords
 
 # Persistent SQLite + downloads location. Declared as a VOLUME so an
 # operator who forgets to mount one still gets a stable named volume.
