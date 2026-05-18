@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { CardSummary, Tier } from "@/lib/types";
 import { TIER_RING_CLASS, TIER_BADGE_CLASS } from "@/lib/synergy/tiers";
 import clsx from "clsx";
@@ -11,16 +12,29 @@ interface Props {
   // Theme rationale: one-line "why this card fits". Rendered below the
   // caption in lighter italic when present.
   rationale?: string;
+  // Optional action button (CardActionButton, etc.) rendered in the
+  // top-right corner of the chip. Suggestions use "+" to add; removal
+  // candidates use "✕" to remove.
+  action?: ReactNode;
 }
 
-export function CardChip({ card, tier, shareCount, caption, rationale }: Props) {
+// Card row used by the sidebar suggestion list and removal panel.
+// Previously the whole chip was an anchor to Scryfall; that made it
+// impossible to nest a button inside (invalid HTML + bubbling).
+// Now the chip is a div, and the card name doubles as the Scryfall
+// link. The action button (when provided) is a separate <button>.
+export function CardChip({
+  card,
+  tier,
+  shareCount,
+  caption,
+  rationale,
+  action,
+}: Props) {
   return (
-    <a
-      href={card.scryfallUri ?? "#"}
-      target={card.scryfallUri ? "_blank" : undefined}
-      rel="noreferrer"
+    <div
       className={clsx(
-        "group relative flex items-start gap-3 rounded-md bg-ink p-2 transition-transform hover:-translate-y-0.5",
+        "group relative flex items-start gap-3 rounded-md bg-ink p-2",
         TIER_RING_CLASS[tier ?? "none"],
       )}
     >
@@ -36,9 +50,22 @@ export function CardChip({ card, tier, shareCount, caption, rationale }: Props) 
         ) : null}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="flex items-center justify-between gap-2">
-          <div className="truncate text-sm font-medium text-stone-100">
-            {card.name}
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            {card.scryfallUri ? (
+              <a
+                href={card.scryfallUri}
+                target="_blank"
+                rel="noreferrer"
+                className="block truncate text-sm font-medium text-stone-100 hover:text-tier-gold"
+              >
+                {card.name}
+              </a>
+            ) : (
+              <div className="truncate text-sm font-medium text-stone-100">
+                {card.name}
+              </div>
+            )}
           </div>
           {tier ? (
             <span
@@ -62,6 +89,7 @@ export function CardChip({ card, tier, shareCount, caption, rationale }: Props) 
           </div>
         ) : null}
       </div>
-    </a>
+      {action ? <div className="shrink-0">{action}</div> : null}
+    </div>
   );
 }

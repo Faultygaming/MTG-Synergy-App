@@ -163,18 +163,20 @@ export default async function DeckPage({
   ).filter((r) => r.themesMatched === 0);
 
   return (
-    <main className="grid min-h-screen grid-cols-[1fr_380px]">
+    // Responsive: single column on mobile (header → map → sidebar →
+    // removal panel, stacked vertically), 2-column on md+ screens.
+    <main className="flex min-h-screen flex-col md:grid md:grid-cols-[1fr_380px]">
       <section className="flex flex-col">
-        <header className="border-b border-ink-line px-6 py-3">
-          <div className="flex items-baseline justify-between">
-            <div>
-              <h1 className="text-lg font-semibold">
+        <header className="border-b border-ink-line px-4 py-3 md:px-6">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate text-base font-semibold md:text-lg">
                 {deck.name}{" "}
                 <span className="ml-2 rounded bg-ink-soft px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-stone-400">
                   {deck.format}
                 </span>
               </h1>
-              <p className="text-xs text-stone-500">
+              <p className="mt-0.5 text-[11px] text-stone-500 md:text-xs">
                 {commanders.length > 0 && (
                   <>
                     cmd:&nbsp;
@@ -201,7 +203,7 @@ export default async function DeckPage({
             </div>
             <Link
               href="/deck/new"
-              className="text-xs text-stone-400 underline-offset-2 hover:underline"
+              className="shrink-0 text-xs text-stone-400 underline-offset-2 hover:underline"
             >
               new deck
             </Link>
@@ -249,16 +251,18 @@ export default async function DeckPage({
             </div>
           </details>
         </header>
-        <div className="relative min-h-0 flex-1">
+        {/* Map: fixed 60vh on mobile so the sidebar is reachable below;
+            flex-1 on desktop to fill the column. */}
+        <div className="relative h-[60vh] min-h-0 md:h-auto md:flex-1">
           <SynergyMap entries={entries} themes={mapThemes} />
         </div>
       </section>
-      <aside className="flex flex-col border-l border-ink-line bg-ink-soft">
+      <aside className="flex flex-col border-t border-ink-line bg-ink-soft md:border-l md:border-t-0">
         <div className="flex-1 overflow-hidden">
           <DeckSidebar suggestions={suggestions} deckId={deck.id} />
         </div>
         {removalCandidates.length > 0 && (
-          <RemovalPanel candidates={removalCandidates} />
+          <RemovalPanel deckId={deck.id} candidates={removalCandidates} />
         )}
       </aside>
     </main>
