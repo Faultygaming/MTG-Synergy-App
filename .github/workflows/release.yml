@@ -44,9 +44,6 @@ jobs:
             runner: ubuntu-latest
           - platform: linux/arm64
             runner: ubuntu-24.04-arm
-    # On PR builds we only validate amd64 — arm64 native runners cost
-    # minutes that aren't needed to prove the Dockerfile compiles.
-    if: github.event_name != 'pull_request' || matrix.platform == 'linux/amd64'
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
