@@ -2,16 +2,17 @@
 
 import { useState } from "react";
 import type { RemovalCandidate } from "@/lib/types";
+import { CardActionButton } from "./CardActionButton";
 
 interface Props {
+  deckId: string;
   candidates: RemovalCandidate[];
 }
 
 // "Cards to consider cutting" — bottom-N of the deck by theme-fit.
 // Server-computed; this client component just renders + handles
-// collapse state. Empty when every deck card touches at least one
-// of the deck's primary themes (highly focused deck).
-export function RemovalPanel({ candidates }: Props) {
+// collapse state and surfaces a one-tap remove button per row.
+export function RemovalPanel({ deckId, candidates }: Props) {
   const [collapsed, setCollapsed] = useState(false);
 
   return (
@@ -53,18 +54,30 @@ export function RemovalPanel({ candidates }: Props) {
                 ) : null}
               </div>
               <div className="min-w-0 flex-1">
-                <a
-                  href={r.card.scryfallUri ?? "#"}
-                  target={r.card.scryfallUri ? "_blank" : undefined}
-                  rel="noreferrer"
-                  className="block truncate text-xs font-medium text-stone-200 hover:text-tier-gold"
-                >
-                  {r.card.name}
-                </a>
+                {r.card.scryfallUri ? (
+                  <a
+                    href={r.card.scryfallUri}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block truncate text-xs font-medium text-stone-200 hover:text-tier-gold"
+                  >
+                    {r.card.name}
+                  </a>
+                ) : (
+                  <div className="block truncate text-xs font-medium text-stone-200">
+                    {r.card.name}
+                  </div>
+                )}
                 <div className="truncate text-[10px] text-stone-500">
                   {r.card.typeLine}
                 </div>
               </div>
+              <CardActionButton
+                deckId={deckId}
+                cardId={r.card.id}
+                action="remove"
+                label={`Remove ${r.card.name} from deck`}
+              />
             </li>
           ))}
         </ul>

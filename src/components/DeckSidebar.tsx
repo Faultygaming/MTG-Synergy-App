@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { SynergySuggestion } from "@/lib/types";
 import { CardChip } from "./CardChip";
+import { CardActionButton } from "./CardActionButton";
 
 interface Props {
   /** Top-N ranked suggestions server-rendered into the initial HTML.
@@ -115,6 +116,14 @@ export function DeckSidebar({ suggestions, deckId }: Props) {
               shareCount={s.shareCount}
               caption={s.sharedKeywords.slice(0, 3).join(", ")}
               rationale={s.rationale}
+              action={
+                <CardActionButton
+                  deckId={deckId}
+                  cardId={s.card.id}
+                  action="add"
+                  label={`Add ${s.card.name} to deck`}
+                />
+              }
             />
           </li>
         ))}

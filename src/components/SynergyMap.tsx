@@ -505,7 +505,9 @@ export function SynergyMap({ entries, themes }: Props) {
   return (
     <div className="relative h-full w-full">
       {/* Controls strip --------------------------------------------------- */}
-      <div className="absolute right-3 top-3 z-10 flex gap-2 text-[11px]">
+      {/* On mobile, controls flex-wrap onto multiple rows. On desktop
+          they sit in a single row in the top-right. */}
+      <div className="absolute right-2 top-2 z-10 flex max-w-[calc(100%-1rem)] flex-wrap justify-end gap-1.5 text-[11px] md:right-3 md:top-3 md:gap-2">
         {/* Layout-mode segmented control */}
         <div
           className="flex overflow-hidden rounded border border-ink-line bg-ink/60 backdrop-blur-sm"
@@ -579,7 +581,8 @@ export function SynergyMap({ entries, themes }: Props) {
         >
           {showCommonWords ? "Common words on" : "Common words hidden"}
         </button>
-        <span className="rounded border border-ink-line bg-ink/60 px-2 py-1 text-stone-500">
+        {/* Desktop-only hint — shift-hover doesn't apply on touch. */}
+        <span className="hidden rounded border border-ink-line bg-ink/60 px-2 py-1 text-stone-500 md:inline">
           shift + hover to enlarge
         </span>
       </div>
