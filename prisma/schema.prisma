@@ -32,6 +32,12 @@ model Card {
   // Scryfall oracle tags ("otag:ramp", "synergy-graveyard", ...) attached
   // to this card. Populated by `pnpm ingest:tags`; empty until then.
   oracleTagsJson  String   @default("[]")
+  // Scryfall's produced_mana field, persisted so reextract / audit
+  // paths can recompute mana-fixing / mana-rock without re-fetching
+  // from the network. JSON array of color letters: ["W","U","B","R","G","C"].
+  // Empty for cards that don't produce mana. Existing rows default to
+  // "[]" until the next `ingest --force` repopulates them.
+  producedManaJson String  @default("[]")
   imageSmall      String?
   imageNormal     String?
   scryfallUri     String?

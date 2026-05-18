@@ -44,6 +44,21 @@ describe("subtypesFromTypeLine", () => {
     expect(subtypesFromTypeLine("Planeswalker — Dakkon")).toEqual([]);
   });
 
+  // Planeswalker emblems are tokens with the character name as subtype
+  // ("Emblem — Arlinn", "Emblem — Sarkhan", "Emblem — Tibalt", ...).
+  // Every 1-card planeswalker name in the audit traced back to here.
+  it("drops planeswalker-emblem subtypes", () => {
+    expect(subtypesFromTypeLine("Emblem — Arlinn")).toEqual([]);
+    expect(subtypesFromTypeLine("Emblem — Sarkhan")).toEqual([]);
+    expect(subtypesFromTypeLine("Emblem — Tibalt")).toEqual([]);
+    expect(subtypesFromTypeLine("Emblem — Wrenn")).toEqual([]);
+  });
+
+  it("drops sticker / art-series subtypes (unique names)", () => {
+    expect(subtypesFromTypeLine("Stickers — Wacky Stickers")).toEqual([]);
+    expect(subtypesFromTypeLine("Card — Art Series")).toEqual([]);
+  });
+
   // DFC / MDFC: "front // back" type_lines must be processed per face,
   // otherwise the planeswalker back leaks its character name through
   // the creature front. Arlinn Kord, Garruk Relentless, Huatli, etc.

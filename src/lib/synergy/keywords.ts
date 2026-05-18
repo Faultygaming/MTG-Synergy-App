@@ -40,6 +40,13 @@ const TYPELINE_NAMED_SUBTYPE_OWNERS = new Set([
   // same way plane names do. Superfriends synergy is still captured by
   // the "planeswalker" type token harvested from BEFORE the em-dash.
   "planeswalker",
+  // Planeswalker emblems are "Emblem — Arlinn" / "Emblem — Sarkhan" /
+  // etc. — every name in our DB's 1-card noise list came from here.
+  "emblem",
+  // Acorn-set sticker cards have unique subtype names.
+  "stickers",
+  // "Art Series" cards (gallery printings) have artist names as subtypes.
+  "art",
 ]);
 
 // Subtypes after the em-dash in a type_line, e.g.
