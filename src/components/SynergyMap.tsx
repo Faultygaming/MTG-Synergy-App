@@ -14,6 +14,7 @@ import {
   edgeTier as edgeTierFn,
   packPieCloud,
   sizeFor as sizeForFn,
+  subgroupKeyFor,
   ART_ASPECT,
   type MapTier,
   type MapTop,
@@ -170,6 +171,15 @@ export function SynergyMap({ entries }: Props) {
       const width = sizeForFn(c.tier, c.shareCount);
       return { width, height: Math.round(width / ART_ASPECT) };
     });
+    // Per-keyword frequency map for both edge filtering AND subgroup
+    // selection within each tier sector.
+    const allKeywordCounts = new Map<string, number>();
+    for (const e of entries) {
+      for (const k of e.card.keywords) {
+        if (excludeKeywords.has(k)) continue;
+        allKeywordCounts.set(k, (allKeywordCounts.get(k) ?? 0) + 1);
+      }
+    }
     const packed = packPieCloud(
       classified.map((c, i) => ({
         id: c.entry.card.id,
@@ -177,6 +187,12 @@ export function SynergyMap({ entries }: Props) {
         height: sizes[i].height,
         tier: c.tier,
         shareCount: c.shareCount,
+        subgroup: subgroupKeyFor(
+          c.entry.card.keywords,
+          top,
+          excludeKeywords,
+          allKeywordCounts,
+        ),
       })),
     );
     const positionById = new Map(packed.map((p) => [p.id, p]));

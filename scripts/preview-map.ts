@@ -21,6 +21,7 @@ import { prisma } from "../src/lib/db";
 import {
   buildMapElements,
   packPieCloud,
+  subgroupKeyFor,
   type MapTier,
 } from "../src/lib/synergy/map";
 import {
@@ -106,13 +107,26 @@ async function main() {
 
   // Same packing algorithm as the React component — pure-math, no
   // headless cytoscape involved.
+  const counts = new Map<string, number>();
+  for (const e of entries) {
+    for (const k of e.card.keywords) {
+      if (COMMON_KEYWORD_STOPLIST.has(k)) continue;
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+  }
   const packed = packPieCloud(
-    nodes.map((n) => ({
+    nodes.map((n, i) => ({
       id: n.id,
       width: n.width,
       height: n.height,
       tier: n.tier,
       shareCount: n.shareCount,
+      subgroup: subgroupKeyFor(
+        entries[i].card.keywords,
+        top,
+        COMMON_KEYWORD_STOPLIST,
+        counts,
+      ),
     })),
   );
   const positions = packed.map((p) => {

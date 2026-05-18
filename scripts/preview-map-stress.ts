@@ -13,6 +13,7 @@ import { resolve } from "node:path";
 import {
   buildMapElements,
   packPieCloud,
+  subgroupKeyFor,
   type MapCard,
   type MapTier,
 } from "../src/lib/synergy/map";
@@ -102,13 +103,28 @@ function main() {
     excludeKeywords: COMMON_KEYWORD_STOPLIST,
     minClusterSize: 3,
   });
+  // Compute per-keyword counts on the synthetic deck so the subgroup
+  // selection matches what the React component would do.
+  const counts = new Map<string, number>();
+  for (const c of cards) {
+    for (const k of c.keywords) {
+      if (COMMON_KEYWORD_STOPLIST.has(k)) continue;
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+  }
   const packed = packPieCloud(
-    nodes.map((n) => ({
+    nodes.map((n, i) => ({
       id: n.id,
       width: n.width,
       height: n.height,
       tier: n.tier,
       shareCount: n.shareCount,
+      subgroup: subgroupKeyFor(
+        cards[i].keywords,
+        top,
+        COMMON_KEYWORD_STOPLIST,
+        counts,
+      ),
     })),
   );
   const positions = packed.map((p) => {
