@@ -23,6 +23,7 @@
     "ingest:tags": "tsx scripts/ingest-oracle-tags.ts",
     "tags:build": "tsx scripts/tags-build.ts",
     "reextract-keywords": "tsx scripts/reextract-keywords.ts",
+    "analyze-keywords": "tsx scripts/analyze-keywords.ts",
     "preview:map": "tsx scripts/preview-map.ts"
   },
   "engines": {
