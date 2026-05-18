@@ -12,7 +12,9 @@ import type { DeckEntry } from "@/lib/types";
 import {
   classifyCard,
   edgeTier as edgeTierFn,
+  packForce,
   packPieCloud,
+  packPlanetary,
   sizeFor as sizeForFn,
   subgroupKeyFor,
   ART_ASPECT,
@@ -20,6 +22,8 @@ import {
   type MapTop,
 } from "@/lib/synergy/map";
 import { buildExcludeSet } from "@/lib/synergy/stoplist";
+
+type LayoutMode = "pie" | "planetary" | "force";
 
 // react-cytoscapejs must be client-only (touches `window`). We also
 // register the cose-bilkent layout extension here so it's available
@@ -89,6 +93,9 @@ export function SynergyMap({ entries }: Props) {
   // dominate frequency rankings without representing real synergy.
   // Off = the curated stoplist is applied (see src/lib/synergy/stoplist.ts).
   const [showCommonWords, setShowCommonWords] = useState(false);
+  // Layout mode. "pie" = current tier-sector wedges; "planetary" =
+  // anchor cards on an outer ring with moons orbiting each.
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>("pie");
 
   // Stoplist + min-cluster threshold applied to BOTH top-3 derivation
   // (so the gold/silver/bronze tiers reflect actual themes) and tier-4
@@ -180,21 +187,60 @@ export function SynergyMap({ entries }: Props) {
         allKeywordCounts.set(k, (allKeywordCounts.get(k) ?? 0) + 1);
       }
     }
-    const packed = packPieCloud(
-      classified.map((c, i) => ({
-        id: c.entry.card.id,
-        width: sizes[i].width,
-        height: sizes[i].height,
-        tier: c.tier,
-        shareCount: c.shareCount,
-        subgroup: subgroupKeyFor(
-          c.entry.card.keywords,
-          top,
-          excludeKeywords,
-          allKeywordCounts,
-        ),
-      })),
+    const packInputs = classified.map((c, i) => ({
+      id: c.entry.card.id,
+      width: sizes[i].width,
+      height: sizes[i].height,
+      tier: c.tier,
+      shareCount: c.shareCount,
+      subgroup: subgroupKeyFor(
+        c.entry.card.keywords,
+        top,
+        excludeKeywords,
+        allKeywordCounts,
+      ),
+      // Filter stoplisted keywords out of the planetary affinity
+      // calculation so moons cluster around anchors based on real
+      // synergy, not on "they're both creatures".
+      keywords: c.entry.card.keywords.filter((k) => !excludeKeywords.has(k)),
+    }));
+    // Build the (filtered) edge list now — needed BOTH for the cytoscape
+    // edge elements below AND, in force mode, as input to packForce.
+    const pendingEdges: Array<{ source: string; target: string; tier: 1 | 2 | 3 | 4 }> = [];
+    const MIN_CLUSTER = 3;
+    const filteredKws = entries.map((e) =>
+      e.card.keywords.filter((k) => !excludeKeywords.has(k)),
     );
+    for (let i = 0; i < entries.length; i++) {
+      const aSet = new Set(filteredKws[i]);
+      for (let j = i + 1; j < entries.length; j++) {
+        const bKws = filteredKws[j];
+        const t = edgeTierFn(bKws, aSet, top);
+        if (t === 0) continue;
+        if (t === 4 && !showQuaternary) continue;
+        if (t === 4) {
+          let bestCount = 0;
+          for (const k of bKws) {
+            if (!aSet.has(k)) continue;
+            const c = allKeywordCounts.get(k) ?? 0;
+            if (c > bestCount) bestCount = c;
+          }
+          if (bestCount < MIN_CLUSTER) continue;
+        }
+        pendingEdges.push({
+          source: entries[i].card.id,
+          target: entries[j].card.id,
+          tier: t,
+        });
+      }
+    }
+
+    const packed =
+      layoutMode === "force"
+        ? packForce(packInputs, pendingEdges)
+        : layoutMode === "planetary"
+          ? packPlanetary(packInputs)
+          : packPieCloud(packInputs);
     const positionById = new Map(packed.map((p) => [p.id, p]));
 
     for (let i = 0; i < classified.length; i++) {
@@ -218,53 +264,20 @@ export function SynergyMap({ entries }: Props) {
       });
     }
 
-    // Card↔card edges with stoplist + min-cluster filtering. Drops
-    // stoplisted keywords from each card's set before deriving the
-    // edge, and suppresses tier-4 edges whose strongest underlying
-    // shared keyword appears on < 3 cards in the deck (so isolated
-    // pairs don't draw a "synergy" line). Top-3 edges (gold/silver/
-    // bronze) always render — they back the tiers the user opted into.
-    const MIN_CLUSTER = 3;
-    const keywordCounts = new Map<string, number>();
-    for (const e of entries) {
-      for (const k of e.card.keywords) {
-        if (excludeKeywords.has(k)) continue;
-        keywordCounts.set(k, (keywordCounts.get(k) ?? 0) + 1);
-      }
+    // Now push the edges already computed for packForce (or computed
+    // again above) as cytoscape elements.
+    const keywordCounts = allKeywordCounts;
+    for (const e of pendingEdges) {
+      els.push({
+        data: {
+          id: `e:${e.source}|${e.target}`,
+          source: `card:${e.source}`,
+          target: `card:${e.target}`,
+          edgeTier: String(e.tier),
+        },
+      });
     }
-    const filteredKws = entries.map((e) =>
-      e.card.keywords.filter((k) => !excludeKeywords.has(k)),
-    );
-    for (let i = 0; i < entries.length; i++) {
-      const aId = entries[i].card.id;
-      const aSet = new Set(filteredKws[i]);
-      for (let j = i + 1; j < entries.length; j++) {
-        const bKws = filteredKws[j];
-        const t = edgeTierFn(bKws, aSet, top);
-        if (t === 0) continue;
-        if (t === 4 && !showQuaternary) continue;
-        if (t === 4) {
-          // Find the most-common shared keyword backing this edge.
-          // Drop the edge if even that keyword is rare in the deck.
-          let bestCount = 0;
-          for (const k of bKws) {
-            if (!aSet.has(k)) continue;
-            const c = keywordCounts.get(k) ?? 0;
-            if (c > bestCount) bestCount = c;
-          }
-          if (bestCount < MIN_CLUSTER) continue;
-        }
-        const bId = entries[j].card.id;
-        els.push({
-          data: {
-            id: `e:${aId}|${bId}`,
-            source: `card:${aId}`,
-            target: `card:${bId}`,
-            edgeTier: String(t),
-          },
-        });
-      }
-    }
+    void keywordCounts;
 
     // Optional keyword overlay — restores the bipartite view when toggled on.
     // Applies the SAME filters as the card-edge path: drop stoplisted
@@ -308,7 +321,7 @@ export function SynergyMap({ entries }: Props) {
     }
 
     return els;
-  }, [entries, top, showKeywords, showQuaternary]);
+  }, [entries, top, showKeywords, showQuaternary, layoutMode, excludeKeywords]);
 
   const stylesheet: StylesheetStyle[] = useMemo(
     () => [
@@ -479,6 +492,36 @@ export function SynergyMap({ entries }: Props) {
     <div className="relative h-full w-full">
       {/* Controls strip --------------------------------------------------- */}
       <div className="absolute right-3 top-3 z-10 flex gap-2 text-[11px]">
+        {/* Layout-mode segmented control */}
+        <div
+          className="flex overflow-hidden rounded border border-ink-line bg-ink/60 backdrop-blur-sm"
+          role="radiogroup"
+          aria-label="Layout mode"
+        >
+          {(["pie", "planetary", "force"] as const).map((mode) => (
+            <button
+              key={mode}
+              onClick={() => setLayoutMode(mode)}
+              role="radio"
+              aria-checked={layoutMode === mode}
+              className={
+                "px-2 py-1 capitalize " +
+                (layoutMode === mode
+                  ? "bg-tier-gold/20 text-tier-gold"
+                  : "text-stone-400 hover:text-stone-100")
+              }
+              title={
+                mode === "pie"
+                  ? "Pie sectors by tier, sub-wedged by secondary keyword"
+                  : mode === "planetary"
+                    ? "Anchor cards on an outer ring with moons orbiting each"
+                    : "Spring-electrical: cards gravitate toward their strongest shared-keyword neighbors"
+              }
+            >
+              {mode}
+            </button>
+          ))}
+        </div>
         <button
           onClick={() => cyRef.current?.fit(undefined, 40)}
           className="rounded border border-ink-line bg-ink/60 px-2 py-1 text-stone-300 backdrop-blur-sm hover:text-stone-100"

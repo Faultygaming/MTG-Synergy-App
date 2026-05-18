@@ -86,6 +86,46 @@ describe("packPieCloud", () => {
     expect(goldRange).toBeGreaterThan(silverRange);
   });
 
+  it("planetary layout places anchors + moons without overlap", () => {
+    // 5 highly-connected gold cards (anchors) + 30 moons with varying
+    // keyword overlap with the anchors.
+    const anchorKws = [["a", "b"], ["a", "c"], ["b", "c"], ["a", "d"], ["b", "d"]];
+    const anchors = anchorKws.map<PackInput>((kw, i) => ({
+      id: `anchor-${i}`,
+      tier: "gold",
+      shareCount: 3,
+      width: 120,
+      height: 90,
+      keywords: kw,
+    }));
+    const moons: PackInput[] = [];
+    for (let i = 0; i < 30; i++) {
+      moons.push({
+        id: `moon-${i}`,
+        tier: i < 10 ? "silver" : i < 20 ? "bronze" : "none",
+        shareCount: 1,
+        width: 70,
+        height: 53,
+        keywords: [anchorKws[i % 5][0]],
+      });
+    }
+    // packPlanetary is exported on the same module
+    return import("./map").then(({ packPlanetary }) => {
+      const positions = packPlanetary([...anchors, ...moons]);
+      expect(positions).toHaveLength(35);
+      const byId = new Map(positions.map((p) => [p.id, p]));
+      const placedRects = [...anchors, ...moons].map((n) => {
+        const p = byId.get(n.id)!;
+        return { x: p.x, y: p.y, w: n.width, h: n.height };
+      });
+      for (let i = 0; i < placedRects.length; i++) {
+        for (let j = i + 1; j < placedRects.length; j++) {
+          expect(overlap(placedRects[i], placedRects[j])).toBe(false);
+        }
+      }
+    });
+  });
+
   it("higher-shareCount cards sit on the innermost ring of their sector", () => {
     // Several gold cards with mixed share counts. The one with shareCount=3
     // should be the closest to the origin.

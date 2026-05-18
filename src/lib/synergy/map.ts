@@ -121,6 +121,9 @@ export interface PackInput {
    * card label. null/undefined cards go into a misc sub-wedge at the
    * end of the tier's slice. */
   subgroup?: string | null;
+  /** Card keywords. Used only by the planetary layout to compute
+   * anchor-moon affinity; pie layout ignores this. */
+  keywords?: readonly string[];
 }
 
 export interface PackPosition {
@@ -328,6 +331,361 @@ export function packPieCloud(
 // Backwards-compatible alias kept while callers transition; this is the
 // public name a future caller should use.
 export const packCloud = packPieCloud;
+
+// ── Planetary / moons layout ─────────────────────────────────────────
+//
+// Alternative to packPieCloud. Identifies K "planets" (the most-central
+// cards in the deck — highest tier + shareCount) and arranges them
+// around the canvas in an outer ring. Every other card becomes a
+// "moon" of whichever planet it shares the most keywords with. Within
+// a planet's moon-system, cards are placed on concentric orbits, with
+// stronger-affinity moons closer in.
+//
+// Use case: shows "which cards anchor the deck" at a glance, and which
+// supporting cards cluster around each anchor. Trade-off vs the pie
+// view: better for spotting anchor cards, worse for spotting tier
+// hierarchy.
+//
+// No overlap by construction — same global overlap check as the pie
+// packer, so planets and moons never collide with each other.
+
+export interface PlanetaryOptions {
+  padding?: number;
+  /** Number of anchor planets. Defaults to clamp(3..6, ceil(sqrt(N)/1.5)). */
+  anchorCount?: number;
+  /** Distance from canvas center to each anchor, in pixels. Defaults
+   * scale with node count so larger decks get bigger orbits. */
+  anchorRadius?: number;
+  /** Inner radius of the moon orbit, measured from the anchor. */
+  moonInnerRadius?: number;
+  /** Gap between concentric moon orbits, in pixels. */
+  moonRingGap?: number;
+}
+
+function affinity(
+  card: PackInput,
+  anchor: PackInput,
+  anchorKws: Set<string>,
+): number {
+  if (!card.keywords) return 0;
+  let n = 0;
+  for (const k of card.keywords) if (anchorKws.has(k)) n += 1;
+  // Tie-breaker: prefer anchors whose tier matches. Boosts the
+  // chance that a gold moon orbits a gold planet when affinities tie.
+  if (card.tier === anchor.tier) n += 0.5;
+  return n;
+}
+
+export function packPlanetary(
+  nodes: PackInput[],
+  options: PlanetaryOptions = {},
+): PackPosition[] {
+  if (nodes.length === 0) return [];
+  const padding = options.padding ?? 14;
+  const moonInnerRadius = options.moonInnerRadius ?? 80;
+  const moonRingGap = options.moonRingGap ?? 12;
+  const anchorCount = Math.max(
+    1,
+    Math.min(
+      nodes.length,
+      options.anchorCount ??
+        Math.max(3, Math.min(6, Math.ceil(Math.sqrt(nodes.length) / 1.5))),
+    ),
+  );
+  // Anchor ring radius scales with deck size so a 99-card deck gets
+  // more room than a 19-card one.
+  const anchorRadius =
+    options.anchorRadius ?? Math.max(300, Math.min(700, nodes.length * 6));
+
+  // Pick the K most "central" cards as anchors. Centrality here is a
+  // tier-aware sort: gold cards first, then by shareCount, then by
+  // bare size as a tiebreak.
+  const TIER_RANK: Record<MapTier, number> = {
+    gold: 3,
+    silver: 2,
+    bronze: 1,
+    none: 0,
+  };
+  const byCentrality = [...nodes].sort(
+    (a, b) =>
+      TIER_RANK[b.tier] - TIER_RANK[a.tier] ||
+      b.shareCount - a.shareCount ||
+      b.width - a.width,
+  );
+  const anchors = byCentrality.slice(0, anchorCount);
+  const anchorIds = new Set(anchors.map((a) => a.id));
+  const anchorKwSets = new Map<string, Set<string>>();
+  for (const a of anchors) {
+    anchorKwSets.set(a.id, new Set(a.keywords ?? []));
+  }
+
+  // Place anchors evenly around an outer ring, starting at 12 o'clock.
+  const anchorPositions = new Map<
+    string,
+    { x: number; y: number; node: PackInput }
+  >();
+  for (let i = 0; i < anchors.length; i++) {
+    const theta = (i / anchors.length) * Math.PI * 2 - Math.PI / 2;
+    anchorPositions.set(anchors[i].id, {
+      x: anchorRadius * Math.cos(theta),
+      y: anchorRadius * Math.sin(theta),
+      node: anchors[i],
+    });
+  }
+
+  // Assign each non-anchor card to its highest-affinity anchor.
+  const moonGroups = new Map<string, PackInput[]>();
+  for (const a of anchors) moonGroups.set(a.id, []);
+  for (const n of nodes) {
+    if (anchorIds.has(n.id)) continue;
+    let bestId = anchors[0].id;
+    let bestAff = -Infinity;
+    for (const a of anchors) {
+      const aff = affinity(n, a, anchorKwSets.get(a.id)!);
+      if (aff > bestAff) {
+        bestAff = aff;
+        bestId = a.id;
+      }
+    }
+    moonGroups.get(bestId)!.push(n);
+  }
+
+  // Place anchors first (they reserve their position; moons can't
+  // overlap with them).
+  interface PlacedRect { x: number; y: number; hw: number; hh: number }
+  const placed: PlacedRect[] = [];
+  const positions: PackPosition[] = [];
+  for (const a of anchors) {
+    const ap = anchorPositions.get(a.id)!;
+    placed.push({
+      x: ap.x,
+      y: ap.y,
+      hw: a.width / 2 + padding / 2,
+      hh: a.height / 2 + padding / 2,
+    });
+    positions.push({ id: a.id, x: ap.x, y: ap.y });
+  }
+
+  function overlapsPlaced(x: number, y: number, w: number, h: number): boolean {
+    const hw = w / 2 + padding / 2;
+    const hh = h / 2 + padding / 2;
+    for (const p of placed) {
+      if (Math.abs(x - p.x) < hw + p.hw && Math.abs(y - p.y) < hh + p.hh) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Place each anchor's moons on concentric orbits around it. Higher-
+  // affinity moons land on the inner orbit (closer to the anchor),
+  // lower-affinity moons farther out.
+  for (const a of anchors) {
+    const ap = anchorPositions.get(a.id)!;
+    const moons = moonGroups.get(a.id)!;
+    moons.sort(
+      (m1, m2) =>
+        affinity(m2, a, anchorKwSets.get(a.id)!) -
+        affinity(m1, a, anchorKwSets.get(a.id)!) ||
+        m2.shareCount - m1.shareCount ||
+        m2.width - m1.width,
+    );
+
+    let r = moonInnerRadius;
+    let i = 0;
+    let slot = 0;
+    let slotsOnRing = 1;
+    let safety = 5000;
+    while (i < moons.length && safety-- > 0) {
+      const m = moons[i];
+      const cardSize = Math.max(m.width, m.height) + padding;
+      if (cardSize >= 2 * r) {
+        r += cardSize / 2 + moonRingGap;
+        slot = 0;
+        continue;
+      }
+      const minDeltaTheta = 2 * Math.asin(cardSize / (2 * r));
+      slotsOnRing = Math.max(1, Math.floor((Math.PI * 2) / minDeltaTheta));
+      const theta = (slot / slotsOnRing) * Math.PI * 2;
+      const x = ap.x + r * Math.cos(theta);
+      const y = ap.y + r * Math.sin(theta);
+      if (!overlapsPlaced(x, y, m.width, m.height)) {
+        placed.push({
+          x,
+          y,
+          hw: m.width / 2 + padding / 2,
+          hh: m.height / 2 + padding / 2,
+        });
+        positions.push({ id: m.id, x, y });
+        i += 1;
+        slot += 1;
+      } else {
+        slot += 1;
+      }
+      if (slot >= slotsOnRing) {
+        r += cardSize + moonRingGap;
+        slot = 0;
+      }
+    }
+  }
+
+  return positions;
+}
+
+// ── Force-directed layout ────────────────────────────────────────────
+//
+// Custom spring-electrical simulation. Each card is a particle; each
+// edge is a spring whose natural length is INVERSE to the edge's tier
+// (tier-1 wants cards to touch, tier-4 wants them at full ideal length).
+// Repulsion between every pair prevents overlap; a gentle gravity pulls
+// the cloud toward the canvas origin so the result fits in viewport.
+//
+// Seeded from packPlanetary so convergence is fast and stable — random
+// start would let the layout flip orientation between runs, which is
+// disorienting. After the physics settles, a final overlap-resolution
+// pass nudges any remaining colliders apart along the shorter axis.
+//
+// O((N² + E) × iterations). N=99, E=219, iterations=400 → ~4 million ops,
+// runs in tens of ms.
+
+export interface ForceOptions {
+  padding?: number;
+  iterations?: number;
+  /** Spring "natural length" for the weakest (tier-4) edge. Stronger
+   * tiers want progressively shorter resting distance. */
+  baseEdgeLength?: number;
+}
+
+export function packForce(
+  nodes: PackInput[],
+  edges: ReadonlyArray<{ source: string; target: string; tier: 1 | 2 | 3 | 4 }>,
+  options: ForceOptions = {},
+): PackPosition[] {
+  if (nodes.length === 0) return [];
+  const padding = options.padding ?? 16;
+  const iterations = options.iterations ?? 400;
+  const baseLen = options.baseEdgeLength ?? 140;
+
+  // Seed from the planetary layout so the physics has a sane starting
+  // arrangement instead of a random one (which would flip orientation
+  // between runs and make A/B comparisons impossible).
+  const seed = new Map(packPlanetary(nodes).map((p) => [p.id, p]));
+  interface Particle { x: number; y: number; vx: number; vy: number; w: number; h: number }
+  const particles = new Map<string, Particle>();
+  for (const n of nodes) {
+    const s = seed.get(n.id) ?? { x: 0, y: 0 };
+    particles.set(n.id, { x: s.x, y: s.y, vx: 0, vy: 0, w: n.width, h: n.height });
+  }
+
+  // Tier weight: tier-1 edges (both cards share the deck's primary
+  // keyword) pull hardest with the shortest resting length.
+  // Parameters tuned for ~100 nodes / ~200 edges. Higher gravity keeps
+  // disconnected components (e.g. lands that only connect via filtered
+  // edges) from drifting off into the corners.
+  const TIER_WEIGHT: Record<1 | 2 | 3 | 4, number> = { 1: 4, 2: 3, 3: 2, 4: 1 };
+  const SPRING_K = 0.06;
+  const REPULSE_K = 2200;
+  const DAMPING = 0.82;
+  const VMAX = 40;
+  const GRAVITY = 0.0015;
+
+  const all = Array.from(particles.values());
+  const ids = Array.from(particles.keys());
+
+  for (let iter = 0; iter < iterations; iter++) {
+    // Repulsion — O(N²), fine for 100ish nodes.
+    for (let i = 0; i < all.length; i++) {
+      const a = all[i];
+      for (let j = i + 1; j < all.length; j++) {
+        const b = all[j];
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        const d2 = dx * dx + dy * dy + 1;
+        const d = Math.sqrt(d2);
+        const f = REPULSE_K / d2;
+        const ux = dx / d;
+        const uy = dy / d;
+        a.vx += ux * f;
+        a.vy += uy * f;
+        b.vx -= ux * f;
+        b.vy -= uy * f;
+      }
+    }
+    // Spring attraction. Higher tier ⇒ shorter natural length AND
+    // stronger pull, so primary-keyword neighbors snap close.
+    for (const e of edges) {
+      const a = particles.get(e.source);
+      const b = particles.get(e.target);
+      if (!a || !b) continue;
+      const w = TIER_WEIGHT[e.tier];
+      const idealLen = baseLen / w;
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const d = Math.sqrt(dx * dx + dy * dy) + 0.01;
+      const f = SPRING_K * w * (d - idealLen);
+      const ux = dx / d;
+      const uy = dy / d;
+      a.vx += ux * f;
+      a.vy += uy * f;
+      b.vx -= ux * f;
+      b.vy -= uy * f;
+    }
+    // Gravity toward origin keeps the cloud centered.
+    for (const p of all) {
+      p.vx -= p.x * GRAVITY;
+      p.vy -= p.y * GRAVITY;
+    }
+    // Integrate with damping + velocity cap.
+    for (const p of all) {
+      p.vx *= DAMPING;
+      p.vy *= DAMPING;
+      const v = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+      if (v > VMAX) {
+        p.vx *= VMAX / v;
+        p.vy *= VMAX / v;
+      }
+      p.x += p.vx;
+      p.y += p.vy;
+    }
+  }
+
+  // Final overlap resolution: small nudges along the shorter axis until
+  // no two rectangles overlap. Bounded so a pathological case can't loop
+  // forever — usually settles in <20 iterations on real data.
+  for (let pass = 0; pass < 80; pass++) {
+    let moved = false;
+    for (let i = 0; i < all.length; i++) {
+      const a = all[i];
+      for (let j = i + 1; j < all.length; j++) {
+        const b = all[j];
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        const minDx = (a.w + b.w) / 2 + padding;
+        const minDy = (a.h + b.h) / 2 + padding;
+        const ox = minDx - Math.abs(dx);
+        const oy = minDy - Math.abs(dy);
+        if (ox > 0 && oy > 0) {
+          if (ox < oy) {
+            const push = (ox / 2) * (dx >= 0 ? 1 : -1);
+            a.x += push;
+            b.x -= push;
+          } else {
+            const push = (oy / 2) * (dy >= 0 ? 1 : -1);
+            a.y += push;
+            b.y -= push;
+          }
+          moved = true;
+        }
+      }
+    }
+    if (!moved) break;
+  }
+
+  return ids.map((id) => {
+    const p = particles.get(id)!;
+    return { id, x: p.x, y: p.y };
+  });
+}
 
 // Pick a card's "secondary signature" — the most-deck-frequent keyword
 // it carries that is NEITHER a tier keyword NOR stoplisted. Cards with
