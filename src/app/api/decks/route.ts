@@ -193,7 +193,13 @@ export async function POST(req: Request) {
   if (body.kind === "paste") {
     deckName = body.name;
     format = "commander";
-    commanderNames = body.commanders ?? [];
+    // Run the commander field through the same parser as the decklist so
+    // a user can paste a Moxfield-style line ("1 Hearthhull, the Worldseed",
+    // "1x Hearthhull (EOS) 123", etc.) and get just the card name. Empty
+    // strings collapse to nothing.
+    commanderNames = (body.commanders ?? [])
+      .flatMap((raw) => parseDecklist(raw).map((p) => p.name))
+      .filter((n) => n.length > 0);
     lines = parseDecklist(body.decklist);
   } else {
     if (!extractDeckId(body.url)) {

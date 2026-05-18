@@ -85,7 +85,7 @@ export function DeckPasteForm() {
             type="text"
             value={commander}
             onChange={(e) => setCommander(e.target.value)}
-            placeholder="e.g. Hearthhull, the Worldseed"
+            placeholder='e.g. "Hearthhull, the Worldseed" or "1 Hearthhull, the Worldseed"'
             className="w-full rounded-md border border-ink-line bg-ink-soft px-3 py-2 text-sm outline-none focus:border-tier-gold"
           />
           <span className="mt-1 block text-[11px] text-stone-500">

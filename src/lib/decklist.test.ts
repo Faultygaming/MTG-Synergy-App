@@ -44,4 +44,18 @@ describe("parseDecklist", () => {
       { name: "Forest", quantity: 2 },
     ]);
   });
+
+  // Used by /api/decks to normalize the commander input field, which
+  // accepts any of: bare name, "1 Name", "1x Name", "1 Name (SET) 123".
+  it("normalizes a single Moxfield-style commander line", () => {
+    expect(parseDecklist("1 Hearthhull, the Worldseed")).toEqual([
+      { name: "Hearthhull, the Worldseed", quantity: 1 },
+    ]);
+    expect(parseDecklist("1x Hearthhull, the Worldseed")).toEqual([
+      { name: "Hearthhull, the Worldseed", quantity: 1 },
+    ]);
+    expect(parseDecklist("1 Hearthhull, the Worldseed (EOS) 145")).toEqual([
+      { name: "Hearthhull, the Worldseed", quantity: 1 },
+    ]);
+  });
 });
