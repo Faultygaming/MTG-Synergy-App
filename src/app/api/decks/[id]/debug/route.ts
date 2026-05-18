@@ -5,6 +5,7 @@ import {
   topThreeKeywords,
   scoreCandidate,
 } from "@/lib/synergy/score";
+import { detectDeckThemes } from "@/lib/synergy/themes";
 import { COMMON_KEYWORD_STOPLIST } from "@/lib/synergy/stoplist";
 import type { DeckEntry } from "@/lib/types";
 
@@ -79,6 +80,7 @@ export async function GET(
   // Histogram WITH stoplist applied — same input to topThreeKeywords.
   const filteredHistogram = keywordFrequency(entries, COMMON_KEYWORD_STOPLIST);
   const top = topThreeKeywords(entries, COMMON_KEYWORD_STOPLIST);
+  const deckThemes = detectDeckThemes(entries);
 
   // For each non-stoplist keyword, list the deck cards that contribute it.
   // Truncate the card list so the response stays manageable on big decks.
@@ -115,7 +117,7 @@ export async function GET(
     })) as unknown as CardRow | null;
     if (row) {
       const summary = rowToSummary(row);
-      const suggestion = scoreCandidate(summary, entries, top);
+      const suggestion = scoreCandidate(summary, entries, top, undefined, deckThemes);
       probe = {
         name: summary.name,
         typeLine: summary.typeLine,
@@ -123,6 +125,8 @@ export async function GET(
         tier: suggestion.tier,
         shareCount: suggestion.shareCount,
         sharedKeywords: suggestion.sharedKeywords,
+        rationale: suggestion.rationale,
+        themeMatches: suggestion.themeMatches,
         whyTier: {
           deckPrimary: top.primary,
           deckSecondary: top.secondary,
@@ -145,6 +149,7 @@ export async function GET(
       cardCount: entries.reduce((n, e) => n + e.quantity, 0),
     },
     top3: top,
+    deckThemes,
     histogram: histogramWithCards,
     stoplistApplied: stoplistApplied.slice(0, 20),
     probe,

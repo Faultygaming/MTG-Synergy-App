@@ -8,9 +8,12 @@ interface Props {
   shareCount?: number;
   // Optional small caption shown under the card (e.g. shared-keyword list).
   caption?: string;
+  // Theme rationale: one-line "why this card fits". Rendered below the
+  // caption in lighter italic when present.
+  rationale?: string;
 }
 
-export function CardChip({ card, tier, shareCount, caption }: Props) {
+export function CardChip({ card, tier, shareCount, caption, rationale }: Props) {
   return (
     <a
       href={card.scryfallUri ?? "#"}
@@ -52,6 +55,11 @@ export function CardChip({ card, tier, shareCount, caption }: Props) {
         <div className="truncate text-[11px] text-stone-500">{card.typeLine}</div>
         {caption ? (
           <div className="mt-1 truncate text-[11px] text-stone-400">{caption}</div>
+        ) : null}
+        {rationale ? (
+          <div className="mt-0.5 line-clamp-2 text-[10px] italic text-stone-500">
+            {rationale}
+          </div>
         ) : null}
       </div>
     </a>

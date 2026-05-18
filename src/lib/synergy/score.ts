@@ -20,6 +20,11 @@ import type {
   SynergySuggestion,
   Tier,
 } from "../types";
+import {
+  scoreCandidateByThemes,
+  themeTier,
+  type ThemeMatch,
+} from "./themes";
 
 export function keywordFrequency(
   deck: DeckEntry[],
@@ -89,14 +94,21 @@ export function scoreCandidate(
   // candidates against the same deck. Optional for callsites that only
   // score one card; required by `rankCandidates` for batching speed.
   deckKeywords?: Set<string>,
+  // Theme-based scoring (the post-May-2026 design). When provided,
+  // the candidate's tier comes from THEME match strength (gold = closes
+  // a loop the deck is missing; silver = moderate on 2+ themes; bronze
+  // = moderate on 1 / weak-only) rather than raw top-3 keyword match.
+  // The keyword tier is still computed as a fallback for callers that
+  // don't pre-compute themes (the existing search route, benchmarks,
+  // older tests).
+  deckThemes?: ThemeMatch[],
 ): SynergySuggestion {
   const deckKws = deckKeywords ?? deckKeywordSet(deck);
 
-  // Single pass over the candidate's keywords: compute `shared` (∩ with
-  // deck) AND tier eligibility (matches against the top 3) in one loop.
-  // Eliminates the 3 separate linear scans of the previous tierForArray
-  // helper. Tier collapses to gold > silver > bronze at the end so the
-  // iteration order of `cardKws` doesn't matter.
+  // Single pass: compute `shared` (∩ with deck) AND keyword-tier
+  // eligibility (matches against the top 3) in one loop. Tier collapses
+  // to gold > silver > bronze at the end so the iteration order of
+  // `cardKws` doesn't matter.
   const cardKws = candidate.keywords;
   const { primary, secondary, tertiary } = top;
   const shared: string[] = [];
@@ -109,7 +121,7 @@ export function scoreCandidate(
     else if (k === secondary) hasSecondary = true;
     else if (k === tertiary) hasTertiary = true;
   }
-  const tier: Tier | null = hasPrimary
+  const keywordTier: Tier | null = hasPrimary
     ? "gold"
     : hasSecondary
       ? "silver"
@@ -117,11 +129,37 @@ export function scoreCandidate(
         ? "bronze"
         : null;
 
+  // If themes were provided, prefer theme-derived tier + rationale.
+  // The strongest theme match (sorted strong > moderate > weak) provides
+  // the headline rationale; the rest are kept in themeMatches for the UI
+  // to expose on hover/expand.
+  let tier: Tier | null = keywordTier;
+  let rationale: string | undefined;
+  let themeMatches:
+    | SynergySuggestion["themeMatches"]
+    | undefined;
+  if (deckThemes && deckThemes.length > 0) {
+    const matches = scoreCandidateByThemes(candidate, deckThemes);
+    const tTier = themeTier(matches);
+    if (tTier) tier = tTier; // theme tier wins when present
+    if (matches.length > 0) {
+      // Headline rationale: the strongest match. Signal ordering: strong > moderate > weak.
+      const SIGNAL_ORDER = { strong: 0, moderate: 1, weak: 2 } as const;
+      const sortedMatches = [...matches].sort(
+        (a, b) => SIGNAL_ORDER[a.signal] - SIGNAL_ORDER[b.signal],
+      );
+      rationale = sortedMatches[0].rationale;
+      themeMatches = sortedMatches;
+    }
+  }
+
   return {
     card: candidate,
     sharedKeywords: shared.sort(),
     tier,
     shareCount: shared.length,
+    rationale,
+    themeMatches,
   };
 }
 
@@ -156,6 +194,10 @@ export function rankCandidates(
   candidates: CardSummary[],
   deck: DeckEntry[],
   excludeKeywords?: ReadonlySet<string>,
+  // Pre-detected deck themes. Pass through to scoreCandidate so theme
+  // tier overrides keyword tier. Computed once by the caller (deck page)
+  // and reused across the whole candidate pool.
+  deckThemes?: ThemeMatch[],
 ): SynergySuggestion[] {
   // Exclude cards already in the deck.
   const inDeck = new Set(deck.map((e) => e.card.id));
@@ -164,7 +206,7 @@ export function rankCandidates(
   const scored: SynergySuggestion[] = [];
   for (const c of candidates) {
     if (inDeck.has(c.id)) continue;
-    scored.push(scoreCandidate(c, deck, top, deckKws));
+    scored.push(scoreCandidate(c, deck, top, deckKws, deckThemes));
   }
   return rankSuggestions(scored);
 }

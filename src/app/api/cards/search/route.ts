@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { rankCandidates, scoreCandidate, topThreeKeywords } from "@/lib/synergy/score";
+import { detectDeckThemes } from "@/lib/synergy/themes";
 import { COMMON_KEYWORD_STOPLIST } from "@/lib/synergy/stoplist";
 import {
   isCandidateLegal,
@@ -84,6 +85,9 @@ export async function GET(req: Request) {
     quantity: dc.quantity,
   }));
   const top = topThreeKeywords(entries, COMMON_KEYWORD_STOPLIST);
+  // Theme-aware tier (Phase 1+2 of the synergy refactor): each search
+  // result picks up a rationale + theme tier matching the deck page.
+  const deckThemes = detectDeckThemes(entries);
   const rulesConfig: CommanderRulesConfig = {
     ...DEFAULT_CONFIG,
     ...(JSON.parse(deck.rulesConfigJson || "{}") as Partial<CommanderRulesConfig>),
@@ -130,7 +134,13 @@ export async function GET(req: Request) {
       continue;
     }
     filtered.push(
-      scoreCandidate(rowToSummary(row), entries, top, filteredDeckKws),
+      scoreCandidate(
+        rowToSummary(row),
+        entries,
+        top,
+        filteredDeckKws,
+        deckThemes,
+      ),
     );
   }
 

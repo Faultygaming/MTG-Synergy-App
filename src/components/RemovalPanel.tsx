@@ -1,0 +1,74 @@
+"use client";
+
+import { useState } from "react";
+import type { RemovalCandidate } from "@/lib/types";
+
+interface Props {
+  candidates: RemovalCandidate[];
+}
+
+// "Cards to consider cutting" — bottom-N of the deck by theme-fit.
+// Server-computed; this client component just renders + handles
+// collapse state. Empty when every deck card touches at least one
+// of the deck's primary themes (highly focused deck).
+export function RemovalPanel({ candidates }: Props) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  return (
+    <div className="border-t border-ink-line bg-ink/60">
+      <button
+        type="button"
+        onClick={() => setCollapsed((c) => !c)}
+        className="flex w-full items-baseline justify-between px-4 py-2 text-left hover:bg-ink-soft"
+      >
+        <div>
+          <div className="text-sm font-semibold text-stone-200">
+            Cards to consider cutting
+            <span className="ml-2 rounded bg-red-950/40 px-1.5 py-0.5 text-[10px] font-normal text-red-300">
+              {candidates.length}
+            </span>
+          </div>
+          <div className="text-[11px] text-stone-500">
+            Match none of your deck&apos;s primary themes.
+          </div>
+        </div>
+        <span className="text-stone-500">{collapsed ? "▸" : "▾"}</span>
+      </button>
+      {!collapsed && (
+        <ul className="max-h-64 space-y-1 overflow-y-auto px-3 pb-3">
+          {candidates.map((r) => (
+            <li
+              key={r.card.id}
+              className="flex items-center gap-2 rounded bg-ink p-1.5"
+            >
+              <div className="h-10 w-7 shrink-0 overflow-hidden rounded-sm bg-ink-line">
+                {r.card.imageSmall ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={r.card.imageSmall}
+                    alt={r.card.name}
+                    className="h-full w-full object-cover"
+                    loading="lazy"
+                  />
+                ) : null}
+              </div>
+              <div className="min-w-0 flex-1">
+                <a
+                  href={r.card.scryfallUri ?? "#"}
+                  target={r.card.scryfallUri ? "_blank" : undefined}
+                  rel="noreferrer"
+                  className="block truncate text-xs font-medium text-stone-200 hover:text-tier-gold"
+                >
+                  {r.card.name}
+                </a>
+                <div className="truncate text-[10px] text-stone-500">
+                  {r.card.typeLine}
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
