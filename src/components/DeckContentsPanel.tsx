@@ -20,7 +20,9 @@ interface Props {
 // commander is set at deck-creation and removing it from this panel
 // would invalidate the deck without a way to pick a replacement.
 export function DeckContentsPanel({ deckId, entries, commanderIds }: Props) {
-  const [collapsed, setCollapsed] = useState(true);
+  // Open by default — the user needs to find the removal UI without
+  // scrolling around looking for it.
+  const [collapsed, setCollapsed] = useState(false);
   const [filter, setFilter] = useState("");
 
   const cmdSet = useMemo(() => new Set(commanderIds ?? []), [commanderIds]);

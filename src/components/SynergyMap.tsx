@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import type {
   Core,
@@ -66,6 +67,10 @@ interface Props {
   // of raw top-3 keyword overlap, so the map's gold/silver/bronze ring
   // colors match what the sidebar shows.
   themes?: MapTheme[];
+  // Deck id powers the tap-to-action popup's Remove button. Pass null
+  // for read-only contexts (the headless preview script doesn't render
+  // SynergyMap directly, but other future consumers might).
+  deckId?: string;
 }
 
 // Sizing + tier classification + edge derivation moved to
@@ -87,7 +92,7 @@ const EDGE_TIER_OPACITY: Record<1 | 2 | 3 | 4, number> = {
   4: 0.08,
 };
 
-export function SynergyMap({ entries, themes }: Props) {
+export function SynergyMap({ entries, themes, deckId }: Props) {
   // UI toggles ------------------------------------------------------------
   // Default view is card-only; flip to add keyword nodes back in.
   const [showKeywords, setShowKeywords] = useState(false);
@@ -121,6 +126,23 @@ export function SynergyMap({ entries, themes }: Props) {
     x: number;
     y: number;
   } | null>(null);
+
+  // Tap-to-action popup state. Tapping a card on the map opens a small
+  // floating menu over the canvas with "Open in Scryfall" + "Remove
+  // from deck" buttons — the discoverable removal affordance the
+  // sidebar's Deck contents panel was supposed to handle but didn't
+  // (users couldn't find it).
+  const [selected, setSelected] = useState<{
+    id: string;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  // Live-physics activity indicator. True while the drag-physics loop
+  // is running (any card grabbed, or system still relaxing after a
+  // drag). Exposed in the controls strip so users can confirm the
+  // loop is alive.
+  const [physicsActive, setPhysicsActive] = useState(false);
 
   useEffect(() => {
     const onDown = (e: KeyboardEvent) => {
@@ -493,7 +515,27 @@ export function SynergyMap({ entries, themes }: Props) {
     const onOut = () => setHover(null);
     cy.off("mouseover").on("mouseover", "node", onOver);
     cy.off("mouseout").on("mouseout", "node", onOut);
-    cy.off("tap").on("tap", () => setHover(null));
+    // Tap handling. A tap on a card opens the action popup; a tap on
+    // empty space dismisses both the popup and the hover overlay.
+    cy.off("tap").on("tap", (evt: EventObject) => {
+      setHover(null);
+      if (evt.target === cy) {
+        setSelected(null);
+        return;
+      }
+      const node = evt.target;
+      if (!node || node.isEdge?.()) {
+        setSelected(null);
+        return;
+      }
+      const id = String(node.id());
+      if (!id.startsWith("card:")) {
+        setSelected(null);
+        return;
+      }
+      const pos = node.renderedPosition();
+      setSelected({ id: id.slice("card:".length), x: pos.x, y: pos.y });
+    });
     // Fit-to-viewport once the initial layout settles. Without this the
     // user lands on whatever pan/zoom cytoscape chose by default, which
     // for force-directed layouts is often "way off to the side" or
@@ -505,10 +547,14 @@ export function SynergyMap({ entries, themes }: Props) {
     if (livePhysicsCleanupRef.current) {
       livePhysicsCleanupRef.current();
     }
-    livePhysicsCleanupRef.current = attachLivePhysics(cy);
+    livePhysicsCleanupRef.current = attachLivePhysics(cy, {
+      onActiveChange: setPhysicsActive,
+    });
   }
 
   const hovered = hover ? cardIndex.get(hover.id) : null;
+  const selectedCard = selected ? cardIndex.get(selected.id) : null;
+  const router = useRouter();
   const showOverlay = shiftDown && hover && hovered;
 
   return (
@@ -590,6 +636,30 @@ export function SynergyMap({ entries, themes }: Props) {
         >
           {showCommonWords ? "Common words on" : "Common words hidden"}
         </button>
+        {/* Live-physics activity indicator. Dot is green while the
+            drag-physics loop is running, dim when idle. Hover gives
+            a tooltip explaining what it means — visible diagnostic
+            so users can confirm physics is alive when something
+            doesn't feel right. */}
+        <span
+          className="inline-flex items-center gap-1.5 rounded border border-ink-line bg-ink/60 px-2 py-1 text-stone-400 backdrop-blur-sm"
+          title={
+            physicsActive
+              ? "Live physics running — drag a card to push neighbors."
+              : "Live physics idle. Grab a card to start a relaxation step."
+          }
+        >
+          <span
+            className={
+              "h-1.5 w-1.5 rounded-full " +
+              (physicsActive
+                ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]"
+                : "bg-stone-700")
+            }
+            aria-hidden
+          />
+          physics
+        </span>
         {/* Desktop-only hint — shift-hover doesn't apply on touch. */}
         <span className="hidden rounded border border-ink-line bg-ink/60 px-2 py-1 text-stone-500 md:inline">
           shift + hover to enlarge
@@ -617,6 +687,58 @@ export function SynergyMap({ entries, themes }: Props) {
           cy={bindCy}
         />
       </div>
+
+      {/* Tap-to-action popup ------------------------------------------- */}
+      {selected && selectedCard && (
+        <div
+          className="absolute z-10 -translate-x-1/2 rounded-md border border-tier-gold/50 bg-ink/95 p-1.5 shadow-lg backdrop-blur-sm"
+          style={{
+            left: selected.x,
+            // Position above the tapped card. SynergyMap's container
+            // is `relative`, so absolute coords map directly to the
+            // cytoscape renderedPosition (which is already in
+            // container-relative pixels).
+            top: Math.max(8, selected.y - 70),
+          }}
+        >
+          <div className="mb-1 max-w-[200px] truncate px-1 text-[11px] font-medium text-stone-200">
+            {selectedCard.name}
+          </div>
+          <div className="flex gap-1.5">
+            {selectedCard.scryfallUri && (
+              <a
+                href={selectedCard.scryfallUri}
+                target="_blank"
+                rel="noreferrer"
+                onClick={() => setSelected(null)}
+                className="rounded bg-ink-soft px-2 py-1 text-[11px] text-stone-200 hover:bg-tier-gold/20 hover:text-tier-gold"
+              >
+                Open
+              </a>
+            )}
+            {deckId && (
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await fetch(
+                      `/api/decks/${deckId}/cards/${selected.id}`,
+                      { method: "DELETE" },
+                    );
+                    setSelected(null);
+                    router.refresh();
+                  } catch {
+                    /* swallow — non-critical */
+                  }
+                }}
+                className="rounded bg-red-950/40 px-2 py-1 text-[11px] text-red-300 hover:bg-red-900/60"
+              >
+                Remove
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Magnified hover overlay --------------------------------------- */}
       {showOverlay ? (
