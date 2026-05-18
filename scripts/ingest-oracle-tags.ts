@@ -63,8 +63,12 @@ async function main() {
       if (!cardTags.has(id)) cardTags.set(id, new Set());
       cardTags.get(id)!.add(tag);
     }
-    // Inter-tag courtesy beat in addition to per-page sleeping inside searchCards.
-    await sleep(200);
+    // Inter-tag courtesy beat in addition to per-page sleeping inside
+    // searchCards. Bumped from 200ms → 500ms; the previous setting was
+    // brushing the 10 req/s ceiling and triggering 429s after ~8 tags
+    // on real runs. The full 58-tag pass takes ~8-10 minutes at this
+    // rate but completes without rate-limiting.
+    await sleep(500);
   }
 
   console.log(`\nApplying tags to ${cardTags.size} cards in the DB...`);

@@ -12,8 +12,8 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { prisma } from "../src/lib/db";
-import { getCardByName, toCardSummary, sleep } from "../src/lib/scryfall";
-import { extractKeywords } from "../src/lib/synergy/keywords";
+import { getCardByName, sleep } from "../src/lib/scryfall";
+import { upsertScryfallCard } from "../src/lib/card-upsert";
 
 async function main() {
   const path = resolve(process.cwd(), "seeds/world-shaper-upgrade-pool.json");
@@ -37,37 +37,7 @@ async function main() {
       missing.push(name);
       continue;
     }
-    const summary = toCardSummary(sc);
-    const keywords = extractKeywords(
-      {
-        keywords: sc.keywords ?? [],
-        type_line: sc.type_line,
-        oracle_text: sc.oracle_text ?? "",
-        produced_mana: sc.produced_mana ?? [],
-      },
-      [],
-    );
-    await prisma.card.upsert({
-      where: { id: summary.id },
-      create: {
-        id: summary.id,
-        name: summary.name,
-        manaCost: summary.manaCost ?? null,
-        cmc: sc.cmc ?? null,
-        typeLine: summary.typeLine,
-        oracleText: sc.oracle_text ?? null,
-        colors: JSON.stringify(summary.colors),
-        colorIdentity: JSON.stringify(sc.color_identity ?? []),
-        power: sc.power ?? null,
-        toughness: sc.toughness ?? null,
-        keywordsJson: JSON.stringify(keywords),
-        imageSmall: summary.imageSmall ?? null,
-        imageNormal: summary.imageNormal ?? null,
-        scryfallUri: summary.scryfallUri ?? null,
-        edhrecRank: sc.edhrec_rank ?? null,
-      },
-      update: { keywordsJson: JSON.stringify(keywords) },
-    });
+    await upsertScryfallCard(sc);
     ok += 1;
     await sleep(110); // Scryfall asks for ~10 req/s ceiling.
   }

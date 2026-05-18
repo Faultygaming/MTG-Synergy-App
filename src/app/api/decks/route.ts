@@ -2,12 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { parseDecklist } from "@/lib/decklist";
-import {
-  getCardsByNames,
-  toCardSummary,
-  type ScryfallCard,
-} from "@/lib/scryfall";
-import { extractKeywords } from "@/lib/synergy/keywords";
+import { getCardsByNames, type ScryfallCard } from "@/lib/scryfall";
+import { upsertScryfallCard as upsertScryfallCardShared } from "@/lib/card-upsert";
 import { extractDeckId, importMoxfieldDeck } from "@/lib/moxfield";
 import {
   validateCommanderDeck,
@@ -120,51 +116,13 @@ function rowToLegalityCard(card: {
   };
 }
 
+// Re-export of the shared helper so the rest of this file's references
+// to `upsertScryfallCard` keep working. See src/lib/card-upsert.ts for
+// the actual logic — it handles the name/id collision the bare
+// prisma.card.upsert() would crash on.
 async function upsertScryfallCard(sc: ScryfallCard) {
-  const summary = toCardSummary(sc);
-  // Preserve any previously-ingested oracle tags (from `pnpm ingest:tags`).
-  const existing = await prisma.card.findUnique({
-    where: { id: summary.id },
-    select: { oracleTagsJson: true },
-  });
-  const oracleTags = existing
-    ? (JSON.parse(existing.oracleTagsJson) as string[])
-    : [];
-  const keywords = extractKeywords(
-    {
-      keywords: sc.keywords ?? [],
-      type_line: sc.type_line,
-      oracle_text: sc.oracle_text ?? "",
-      produced_mana: sc.produced_mana ?? [],
-    },
-    oracleTags,
-  );
-  return prisma.card.upsert({
-    where: { id: summary.id },
-    create: {
-      id: summary.id,
-      name: summary.name,
-      manaCost: summary.manaCost ?? null,
-      cmc: sc.cmc ?? null,
-      typeLine: summary.typeLine,
-      oracleText: sc.oracle_text ?? null,
-      colors: JSON.stringify(summary.colors),
-      colorIdentity: JSON.stringify(sc.color_identity ?? []),
-      power: sc.power ?? null,
-      toughness: sc.toughness ?? null,
-      keywordsJson: JSON.stringify(keywords),
-      oracleTagsJson: JSON.stringify(oracleTags),
-      imageSmall: summary.imageSmall ?? null,
-      imageNormal: summary.imageNormal ?? null,
-      scryfallUri: summary.scryfallUri ?? null,
-      edhrecRank: sc.edhrec_rank ?? null,
-    },
-    update: {
-      keywordsJson: JSON.stringify(keywords),
-      colorIdentity: JSON.stringify(sc.color_identity ?? []),
-      oracleText: sc.oracle_text ?? null,
-    },
-  });
+  const { card } = await upsertScryfallCardShared(sc);
+  return card;
 }
 
 // POST /api/decks

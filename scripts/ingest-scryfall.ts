@@ -18,9 +18,16 @@ import { resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import { prisma } from "../src/lib/db";
-import { extractKeywords } from "../src/lib/synergy/keywords";
+import { upsertScryfallCard } from "../src/lib/card-upsert";
 import type { ScryfallCard } from "../src/lib/scryfall";
 const FORCE = process.argv.includes("--force");
+// Optional override: `--file <path>` ingests from a local JSON file
+// instead of fetching the Scryfall bulk archive. Used by the validation
+// smoke suite to exercise the upsert path against synthetic data without
+// hitting the network.
+const FILE_FLAG_IDX = process.argv.indexOf("--file");
+const FILE_OVERRIDE =
+  FILE_FLAG_IDX > -1 ? process.argv[FILE_FLAG_IDX + 1] : null;
 
 interface BulkEntry {
   type: string;
@@ -61,67 +68,40 @@ async function downloadIfMissing(url: string, dest: string) {
 }
 
 async function main() {
-  const dir = resolve(process.cwd(), "data/scryfall-bulk");
-  await mkdir(dir, { recursive: true });
-  const dest = resolve(dir, "oracle-cards.json");
-
-  const entry = await findOracleBulk();
-  await downloadIfMissing(entry.download_uri, dest);
+  let dest: string;
+  if (FILE_OVERRIDE) {
+    dest = resolve(FILE_OVERRIDE);
+    console.log(`Reading from override file ${dest} (skipping Scryfall download)`);
+  } else {
+    const dir = resolve(process.cwd(), "data/scryfall-bulk");
+    await mkdir(dir, { recursive: true });
+    dest = resolve(dir, "oracle-cards.json");
+    const entry = await findOracleBulk();
+    await downloadIfMissing(entry.download_uri, dest);
+  }
 
   console.log("Parsing JSON (this may take a moment)...");
   const cards = JSON.parse(await readFile(dest, "utf8")) as ScryfallCard[];
   console.log(`Ingesting ${cards.length} oracle cards...`);
 
   let i = 0;
+  let created = 0;
+  let updated = 0;
+  let merged = 0; // existing-by-name-with-different-id (fixture carryover)
   for (const c of cards) {
     if (!c.oracle_id) continue;
-    // Preserve oracle tags from a prior `pnpm ingest:tags` run; bulk ingest
-    // refreshes printed fields but tags are scoped to the otag: pipeline.
-    const existing = await prisma.card.findUnique({
-      where: { id: c.oracle_id },
-      select: { oracleTagsJson: true },
-    });
-    const oracleTags = existing
-      ? (JSON.parse(existing.oracleTagsJson) as string[])
-      : [];
-    const keywords = extractKeywords(
-      {
-        keywords: c.keywords ?? [],
-        type_line: c.type_line,
-        oracle_text: c.oracle_text ?? "",
-        produced_mana: c.produced_mana ?? [],
-      },
-      oracleTags,
-    );
-    const images = c.image_uris ?? c.card_faces?.[0]?.image_uris;
-    await prisma.card.upsert({
-      where: { id: c.oracle_id },
-      create: {
-        id: c.oracle_id,
-        name: c.name,
-        manaCost: c.mana_cost ?? null,
-        cmc: c.cmc ?? null,
-        typeLine: c.type_line,
-        oracleText: c.oracle_text ?? null,
-        colors: JSON.stringify(c.colors ?? []),
-        colorIdentity: JSON.stringify(c.color_identity ?? []),
-        power: c.power ?? null,
-        toughness: c.toughness ?? null,
-        keywordsJson: JSON.stringify(keywords),
-        imageSmall: images?.small ?? null,
-        imageNormal: images?.normal ?? null,
-        scryfallUri: c.scryfall_uri ?? null,
-        edhrecRank: c.edhrec_rank ?? null,
-      },
-      update: {
-        keywordsJson: JSON.stringify(keywords),
-        oracleText: c.oracle_text ?? null,
-        edhrecRank: c.edhrec_rank ?? null,
-      },
-    });
+    // The unique constraints on BOTH id AND name make a naive upsert
+    // crash with P2002 when a fixture row already has the same name.
+    // upsertScryfallCard() handles both cases via findFirst({OR}).
+    const r = await upsertScryfallCard(c);
+    if (r.created) created += 1;
+    else if (r.idMismatch) merged += 1;
+    else updated += 1;
     if (++i % 500 === 0) console.log(`  ${i}/${cards.length}`);
   }
-  console.log("Ingest complete.");
+  console.log(
+    `Ingest complete. ${created} created, ${updated} refreshed, ${merged} merged into existing rows.`,
+  );
 }
 
 main()

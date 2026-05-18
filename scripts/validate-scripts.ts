@@ -17,7 +17,7 @@
  * Wired into `pnpm validate` so every push gets it.
  */
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -108,6 +108,63 @@ async function run() {
   ]);
   step("seed after collision (must not crash)", [
     "scripts/seed-fixtures.ts",
+  ]);
+
+  console.log("\ningest-scryfall.ts (synthetic bulk, no network)");
+  // Write a tiny synthetic bulk file: 3 cards, one of which has the
+  // SAME NAME as a fixture row that seed just created ("Sol Ring") but
+  // a different oracle_id. That's the exact P2002 collision the user
+  // hit. The ingest must merge into the existing row, not crash.
+  const bulkPath = join(tmpDir, "synth-bulk.json");
+  writeFileSync(
+    bulkPath,
+    JSON.stringify([
+      {
+        oracle_id: "real-scryfall-id-sol-ring",
+        name: "Sol Ring",
+        type_line: "Artifact",
+        oracle_text: "{T}: Add {C}{C}.",
+        cmc: 1,
+        colors: [],
+        color_identity: [],
+        keywords: [],
+        scryfall_uri: "https://scryfall.com/card/cmr/309/sol-ring",
+        image_uris: {
+          small: "https://cards.scryfall.io/small/x.jpg",
+          normal: "https://cards.scryfall.io/normal/x.jpg",
+        },
+      },
+      {
+        oracle_id: "real-scryfall-id-foo-bar",
+        name: "Foo Bar (synthetic)",
+        type_line: "Creature — Elf",
+        oracle_text: "",
+        cmc: 1,
+        colors: ["G"],
+        color_identity: ["G"],
+        keywords: ["Flying"],
+      },
+      {
+        oracle_id: "real-scryfall-id-baz-quux",
+        name: "Baz Quux (synthetic)",
+        type_line: "Instant",
+        oracle_text: "Counter target spell.",
+        cmc: 2,
+        colors: ["U"],
+        color_identity: ["U"],
+        keywords: [],
+      },
+    ]),
+  );
+  step("ingest against synthetic bulk (must merge by name, not crash)", [
+    "scripts/ingest-scryfall.ts",
+    "--file",
+    bulkPath,
+  ]);
+  step("ingest again (idempotent, all should be 'refreshed')", [
+    "scripts/ingest-scryfall.ts",
+    "--file",
+    bulkPath,
   ]);
 
   console.log("\npreview-map.ts");

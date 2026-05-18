@@ -121,19 +121,39 @@ export async function getCardsByNames(
   return { found, notFound };
 }
 
+// One fetch + one automatic retry on 429 (honoring Retry-After). The
+// search endpoint is bursty across tags during ingest:tags, so we
+// can't just throw the first time we hit a rate limit — most of the
+// run would die.
+async function fetchWithRetry(url: string): Promise<Response> {
+  let res = await fetch(url, { headers: headers() });
+  if (res.status !== 429) return res;
+  const retryAfter = parseInt(res.headers.get("retry-after") ?? "60", 10);
+  // Cap at 75s so a misbehaving server can't hang the script forever.
+  const waitMs = Math.min(Math.max(retryAfter, 5), 75) * 1000;
+  console.warn(
+    `[scryfall] 429 rate-limited; waiting ${Math.round(waitMs / 1000)}s before retry...`,
+  );
+  await sleep(waitMs);
+  res = await fetch(url, { headers: headers() });
+  return res;
+}
+
 export async function searchCards(query: string, maxPages = 1): Promise<ScryfallCard[]> {
   const out: ScryfallCard[] = [];
   let url: string | undefined = `${BASE}/cards/search?q=${encodeURIComponent(query)}`;
   let page = 0;
   while (url && page < maxPages) {
-    const res: Response = await fetch(url, { headers: headers() });
+    const res: Response = await fetchWithRetry(url);
     if (res.status === 404) return out;
     if (!res.ok) throw new Error(`Scryfall ${res.status}: ${await res.text()}`);
     const body = (await res.json()) as ScryfallList<ScryfallCard>;
     out.push(...body.data);
     url = body.has_more ? body.next_page : undefined;
     page += 1;
-    if (url) await sleep(120); // be polite between pages
+    // Bumped from 120ms → 220ms to stay safely under 10 req/s during
+    // long ingest:tags runs that issue back-to-back paginated searches.
+    if (url) await sleep(220);
   }
   return out;
 }
