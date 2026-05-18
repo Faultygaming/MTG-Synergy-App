@@ -63,6 +63,71 @@ describe("extractKeywords", () => {
     expect(kws).toContain("ramp");
   });
 
+  // Hearthhull / World Shaper-style archetype checks. These cards used
+  // to extract to just ["artifact"] / ["creature"] and missed the
+  // landfall-recursion theme entirely. The new regex pack catches them.
+  it("tags Crucible of Worlds with land-recursion", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Artifact",
+      oracle_text: "You may play lands from your graveyard.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("land-recursion");
+  });
+
+  it("tags Ramunap Excavator with land-recursion", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Creature — Naga Cleric",
+      oracle_text: "You may play land cards from your graveyard.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("land-recursion");
+  });
+
+  it("tags Exploration with extra-land-drops", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Enchantment",
+      oracle_text: "You may play an additional land on each of your turns.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("extra-land-drops");
+  });
+
+  it("tags Lord Windgrace-style landfall payoffs", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Legendary Creature — Beast",
+      oracle_text: "Landfall — Whenever a land you control enters, create a 2/2 green Cat Warrior creature token.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("landfall");
+  });
+
+  it("tags Dockside Extortionist with treasure", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Creature — Goblin Pirate",
+      oracle_text:
+        "When Dockside Extortionist enters the battlefield, create X Treasure tokens, where X is the number of artifacts and enchantments your opponents control.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("treasure");
+  });
+
+  it("tags 'lands matter' cards like Rampaging Baloths", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Creature — Beast",
+      oracle_text:
+        "Trample. Landfall — Whenever a land you control enters, create a 3/3 green Beast creature token.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("landfall");
+  });
+
   it("unions Scryfall oracle tags into the keyword set as 'otag:*'", () => {
     const kws = extractKeywords(
       {

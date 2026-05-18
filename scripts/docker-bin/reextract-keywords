@@ -1,0 +1,11 @@
+#!/bin/sh
+# Inside the container: re-run extractKeywords against every Card row in
+# the DB using the CURRENT regex pack + stoplist. Use after pulling an
+# image that changes keyword-extraction logic — existing rows otherwise
+# keep their stale keyword sets until the Scryfall bulk file's
+# updated_at changes (which only happens a few times a day).
+#
+# Faster than `ingest --force` because it doesn't re-download or re-
+# parse the 120MB bulk file. Equivalent to `pnpm reextract-keywords` on
+# a dev machine.
+exec node /app/node_modules/tsx/dist/cli.mjs /app/scripts/reextract-keywords.ts "$@"

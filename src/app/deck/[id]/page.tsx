@@ -98,13 +98,15 @@ export default async function DeckPage({
 
   // Candidate pool: every card in the DB that's not already in the deck
   // AND is legal in the commander's color identity (banned / out-of-CI filtered).
+  // No take cap — the synergy ranker is fast enough to score the full
+  // corpus on render, and capping at 2000 missed deep-pool synergies
+  // like Crucible of Worlds for land-recursion decks.
   const inDeckIds = new Set([
     ...entries.map((e) => e.card.id),
     ...commanderIds,
   ]);
   const candidateRows = (await prisma.card.findMany({
     where: { id: { notIn: Array.from(inDeckIds) } },
-    take: 2000,
   })) as unknown as CardRow[];
 
   const candidates: CardSummary[] = [];
@@ -122,7 +124,7 @@ export default async function DeckPage({
     candidates,
     entries,
     COMMON_KEYWORD_STOPLIST,
-  ).slice(0, 60);
+  ).slice(0, 100);
 
   return (
     <main className="grid min-h-screen grid-cols-[1fr_380px]">
@@ -209,7 +211,7 @@ export default async function DeckPage({
         </div>
       </section>
       <aside className="border-l border-ink-line bg-ink-soft">
-        <DeckSidebar suggestions={suggestions} />
+        <DeckSidebar suggestions={suggestions} deckId={deck.id} />
       </aside>
     </main>
   );
