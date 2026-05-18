@@ -21,6 +21,20 @@ describe("subtypesFromTypeLine", () => {
   it("returns empty array when there's no subtype", () => {
     expect(subtypesFromTypeLine("Sorcery")).toEqual([]);
   });
+
+  // Plane / Phenomenon / Vanguard / etc. have UNIQUE NAMES as subtypes
+  // (e.g. "Plane — Zhalfir", "Vanguard — Selvala"). Those names create
+  // 1-card keyword entries that pollute the global histogram, so we
+  // strip the subtype list for these owner types. The card still
+  // contributes its supertype/type tokens (plane, phenomenon, …).
+  it("drops unique-name subtypes for Plane / Vanguard / Scheme", () => {
+    expect(subtypesFromTypeLine("Plane — Zhalfir")).toEqual([]);
+    expect(subtypesFromTypeLine("Phenomenon — Spatial Merging")).toEqual([]);
+    expect(subtypesFromTypeLine("Vanguard — Selvala")).toEqual([]);
+    expect(subtypesFromTypeLine("Scheme — All in Good Time")).toEqual([]);
+    expect(subtypesFromTypeLine("Dungeon — Lost Mine of Phandelver")).toEqual([]);
+    expect(subtypesFromTypeLine("Conspiracy — Hidden Agenda")).toEqual([]);
+  });
 });
 
 describe("extractKeywords", () => {
@@ -84,6 +98,138 @@ describe("extractKeywords", () => {
       produced_mana: [],
     });
     expect(kws).toContain("land-recursion");
+  });
+
+  // Audit (May 2026) showed these basic-land tutors had ZERO keywords.
+  // The previous ramp regex required "a/an" before the land noun, which
+  // missed "up to two basic land cards" and typed-land tutors.
+  it("tags Cultivate (up to two basic lands) with ramp", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Sorcery",
+      oracle_text:
+        "Search your library for up to two basic land cards, reveal those cards, put one onto the battlefield tapped and the other into your hand, then shuffle.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("ramp");
+  });
+
+  it("tags Skyshroud Claim (typed land tutor) with ramp", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Sorcery",
+      oracle_text:
+        "Search your library for up to two Forest cards, put them onto the battlefield, then shuffle.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("ramp");
+  });
+
+  it("tags World Shaper (any-number land tutor) with ramp", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Creature — Elemental",
+      oracle_text:
+        "When World Shaper dies, you may shuffle your graveyard into your library. When you do, search your library for any number of land cards and put them onto the battlefield tapped.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("ramp");
+    expect(kws).toContain("death-trigger");
+  });
+
+  it("tags Splendid Reclamation (return all lands) with land-recursion", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Sorcery",
+      oracle_text:
+        "Return all land cards from your graveyard to the battlefield tapped.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("land-recursion");
+  });
+
+  it("tags Aftermath Analyst (return all lands) with land-recursion", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Creature — Human Druid",
+      oracle_text:
+        "{2}{G}, Sacrifice Aftermath Analyst: Return all land cards from your graveyard to the battlefield tapped.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("land-recursion");
+  });
+
+  // mana-rock / mana-dork are now context-aware: type_line decides.
+  it("tags Sol Ring as mana-rock (artifact), not basic lands", () => {
+    const sol = extractKeywords({
+      keywords: [],
+      type_line: "Artifact",
+      oracle_text: "{T}: Add {C}{C}.",
+      produced_mana: ["C"],
+    });
+    expect(sol).toContain("mana-rock");
+    expect(sol).not.toContain("mana-dork");
+
+    const forest = extractKeywords({
+      keywords: [],
+      type_line: "Basic Land — Forest",
+      oracle_text: "{T}: Add {G}.",
+      produced_mana: ["G"],
+    });
+    expect(forest).not.toContain("mana-rock");
+    expect(forest).not.toContain("mana-dork");
+  });
+
+  it("tags Llanowar Elves as mana-dork (creature), not mana-rock", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Creature — Elf Druid",
+      oracle_text: "{T}: Add {G}.",
+      produced_mana: ["G"],
+    });
+    expect(kws).toContain("mana-dork");
+    expect(kws).not.toContain("mana-rock");
+  });
+
+  // Static Orb: the audit showed it returned zero archetype keywords
+  // because stax-tap-untap only matched "don't untap" / "doesn't untap
+  // during", missing "can't untap more than".
+  it("tags Static Orb with stax-tap-untap", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Artifact",
+      oracle_text:
+        "As long as Static Orb is untapped, players can't untap more than two permanents during their untap steps.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("stax-tap-untap");
+  });
+
+  // Real Dark Ritual's oracle text is "Add {B}{B}{B}." — the previous
+  // ritual regex only matched the paraphrased "three mana" wording.
+  it("tags real Dark Ritual ({B}{B}{B} form) with ritual", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Instant",
+      oracle_text: "Add {B}{B}{B}.",
+      produced_mana: ["B"],
+    });
+    expect(kws).toContain("ritual");
+  });
+
+  // Blasphemous Act has cost reduction that depended on board state,
+  // not tribe. The renamed "cost-reduction" keyword keeps catching it
+  // without the misleading "tribal-" prefix.
+  it("renames tribal-cost-reduction → cost-reduction (no false tribal label)", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Sorcery",
+      oracle_text:
+        "This spell costs {1} less to cast for each creature on the battlefield. Destroy all creatures.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("cost-reduction");
+    expect(kws).not.toContain("tribal-cost-reduction");
   });
 
   it("tags Exploration with extra-land-drops", () => {
