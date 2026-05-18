@@ -1,13 +1,17 @@
-# Lightweight CI: typecheck, lint, and tests on every PR and push. Keeps
-# the release workflow (which builds + pushes images) fast by running
+# Lightweight CI: typecheck, lint, and tests on every PR. Keeps the
+# release workflow (which builds + pushes images) fast by running
 # correctness checks here instead.
+#
+# Only runs on PRs. Re-running on main after merge is redundant — the
+# code that gets merged was already CI'd on the PR branch (squash merge
+# preserves the same diff), so the post-merge run would be the same
+# checks against the same code. release.yml handles main-branch Docker
+# builds. `workflow_dispatch` is kept as a manual safety net.
 
 name: ci
 
 on:
   pull_request:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
