@@ -429,5 +429,17 @@ export function extractKeywords(
   const NOISE = new Set(["legendary", "basic", "snow", "tribal", "—", ""]);
   for (const n of NOISE) out.delete(n);
 
+  // Disambiguate "tutor" vs "ramp". The generic `tutor` regex
+  // (`search your library for a ... card`) matches basic-land tutors
+  // too, so every fetch land (Cabaretti Courtyard, Evolving Wilds,
+  // Fabled Passage, …) AND every land-ramp spell (Cultivate, Farseek,
+  // Nature's Lore) ends up double-tagged ramp + tutor. That inflates
+  // the deck's tutor count enough to crowd a real archetype out of
+  // bronze tier. If `ramp` is set, the search target was a land — drop
+  // the redundant `tutor` tag. (Real card tutors — Demonic Tutor,
+  // Vampiric Tutor — have no land in their search, so don't get `ramp`
+  // and keep `tutor`.)
+  if (out.has("ramp")) out.delete("tutor");
+
   return Array.from(out).sort();
 }

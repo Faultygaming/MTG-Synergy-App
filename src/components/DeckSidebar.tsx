@@ -114,6 +114,7 @@ export function DeckSidebar({ suggestions, deckId }: Props) {
               tier={s.tier}
               shareCount={s.shareCount}
               caption={s.sharedKeywords.slice(0, 3).join(", ")}
+              rationale={s.rationale}
             />
           </li>
         ))}

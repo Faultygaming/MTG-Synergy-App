@@ -1,11 +1,21 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import type { CardSummary, DeckEntry, SynergySuggestion } from "@/lib/types";
+import type {
+  CardSummary,
+  DeckEntry,
+  RemovalCandidate,
+  SynergySuggestion,
+} from "@/lib/types";
 import { rankCandidates, topThreeKeywords } from "@/lib/synergy/score";
+import {
+  detectDeckThemes,
+  scoreDeckCardsForRemoval,
+} from "@/lib/synergy/themes";
 import { COMMON_KEYWORD_STOPLIST } from "@/lib/synergy/stoplist";
 import { DeckSidebar } from "@/components/DeckSidebar";
 import { SynergyMap } from "@/components/SynergyMap";
+import { RemovalPanel } from "@/components/RemovalPanel";
 import {
   formatViolation,
   isCandidateLegal,
@@ -120,11 +130,24 @@ export default async function DeckPage({
     }
     candidates.push(rowToSummary(row));
   }
+  // Detect the deck's primary archetype themes (lands-matter, aristocrats,
+  // spellslinger, …). Threaded through rankCandidates so each suggestion
+  // gets a theme-derived tier + rationale ("Your deck has 8 enablers
+  // but only 1 payoff — this closes the loop") instead of the older
+  // raw keyword-overlap tier. See src/lib/synergy/themes.ts.
+  const deckThemes = detectDeckThemes(entries);
   const suggestions: SynergySuggestion[] = rankCandidates(
     candidates,
     entries,
     COMMON_KEYWORD_STOPLIST,
+    deckThemes,
   ).slice(0, 100);
+  // Removal panel: cards in the deck that match 0 of the deck's primary
+  // themes — these are the first cuts when making room.
+  const removalCandidates: RemovalCandidate[] = scoreDeckCardsForRemoval(
+    entries,
+    deckThemes,
+  ).filter((r) => r.themesMatched === 0);
 
   return (
     <main className="grid min-h-screen grid-cols-[1fr_380px]">
@@ -148,12 +171,19 @@ export default async function DeckPage({
                     ·{" "}
                   </>
                 )}
-                {entries.length} cards · primary&nbsp;
-                <span className="text-tier-gold">{top.primary ?? "—"}</span> ·
-                secondary&nbsp;
-                <span className="text-tier-silver">{top.secondary ?? "—"}</span> ·
-                tertiary&nbsp;
-                <span className="text-tier-bronze">{top.tertiary ?? "—"}</span>
+                {entries.length} cards
+                {deckThemes.length > 0 && (
+                  <>
+                    {" "}· themes&nbsp;
+                    {deckThemes.slice(0, 3).map((t, i) => (
+                      <span key={t.themeId}>
+                        {i > 0 && <span className="text-stone-600"> · </span>}
+                        <span className="text-tier-gold">{t.themeLabel}</span>
+                        <span className="text-stone-500"> ({t.totalCount})</span>
+                      </span>
+                    ))}
+                  </>
+                )}
               </p>
             </div>
             <Link
@@ -210,8 +240,13 @@ export default async function DeckPage({
           <SynergyMap entries={entries} />
         </div>
       </section>
-      <aside className="border-l border-ink-line bg-ink-soft">
-        <DeckSidebar suggestions={suggestions} deckId={deck.id} />
+      <aside className="flex flex-col border-l border-ink-line bg-ink-soft">
+        <div className="flex-1 overflow-hidden">
+          <DeckSidebar suggestions={suggestions} deckId={deck.id} />
+        </div>
+        {removalCandidates.length > 0 && (
+          <RemovalPanel candidates={removalCandidates} />
+        )}
       </aside>
     </main>
   );
