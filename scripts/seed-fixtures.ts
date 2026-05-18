@@ -18,12 +18,20 @@ async function main() {
   const cards = JSON.parse(raw) as ScryfallCard[];
   console.log(`Loading ${cards.length} fixture cards...`);
 
+  let created = 0;
+  let refreshed = 0;
+  let skipped = 0;
+
   for (const c of cards) {
-    // Preserve any oracle tags already in the DB from a previous
-    // `pnpm ingest:tags` run, so re-seeding fixtures doesn't wipe them.
-    const existing = await prisma.card.findUnique({
-      where: { id: c.oracle_id ?? c.id },
-      select: { oracleTagsJson: true },
+    // Fixtures use synthetic IDs like "fixture-sol-ring". If the user has
+    // already pasted a real deck, the DB may contain "Sol Ring" with a
+    // real Scryfall oracle_id. The schema has unique constraints on BOTH
+    // id and name, so a naive upsert(where: {id}) tries to INSERT and
+    // dies with P2002 on the name. Look up by EITHER and update in place.
+    const fixtureId = c.oracle_id ?? c.id;
+    const existing = await prisma.card.findFirst({
+      where: { OR: [{ id: fixtureId }, { name: c.name }] },
+      select: { id: true, oracleTagsJson: true },
     });
     const oracleTags = existing
       ? (JSON.parse(existing.oracleTagsJson) as string[])
@@ -37,11 +45,28 @@ async function main() {
       },
       oracleTags,
     );
+
+    if (existing) {
+      // Real Scryfall data takes precedence over fixtures — only refresh
+      // the computed keyword set (in case extractKeywords logic improved).
+      // Don't touch id/name/images/etc.
+      if (existing.id !== fixtureId) {
+        skipped += 1;
+      } else {
+        await prisma.card.update({
+          where: { id: existing.id },
+          data: { keywordsJson: JSON.stringify(keywords) },
+        });
+        refreshed += 1;
+      }
+      continue;
+    }
+
+    // Brand-new card: insert from the fixture data.
     const images = c.image_uris ?? c.card_faces?.[0]?.image_uris;
-    await prisma.card.upsert({
-      where: { id: c.oracle_id ?? c.id },
-      create: {
-        id: c.oracle_id ?? c.id,
+    await prisma.card.create({
+      data: {
+        id: fixtureId,
         name: c.name,
         manaCost: c.mana_cost ?? null,
         cmc: c.cmc ?? null,
@@ -58,13 +83,12 @@ async function main() {
         scryfallUri: c.scryfall_uri ?? null,
         edhrecRank: c.edhrec_rank ?? null,
       },
-      update: {
-        keywordsJson: JSON.stringify(keywords),
-        oracleText: c.oracle_text ?? null,
-      },
     });
+    created += 1;
   }
-  console.log("Done.");
+  console.log(
+    `Done. ${created} created, ${refreshed} refreshed, ${skipped} skipped (already present from a real Scryfall lookup).`,
+  );
 }
 
 main()
