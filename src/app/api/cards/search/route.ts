@@ -105,6 +105,20 @@ export async function GET(req: Request) {
     take: 300,
   })) as unknown as CardRow[];
 
+  // Pre-build the deck's NON-STOPLIST keyword set once, and pass it to
+  // scoreCandidate via its deckKeywords param. Without this, the
+  // `sharedKeywords` returned would include stoplisted noise terms
+  // (`land`, `produces-b`, `artifact`, …) since scoreCandidate's
+  // default deckKeywords = union of ALL deck keywords with no filter.
+  // The displayed caption would then leak those.
+  const filteredDeckKws = new Set<string>();
+  for (const e of entries) {
+    for (const k of e.card.keywords) {
+      if (COMMON_KEYWORD_STOPLIST.has(k)) continue;
+      filteredDeckKws.add(k);
+    }
+  }
+
   const filtered: SynergySuggestion[] = [];
   for (const row of matches) {
     if (inDeck.has(row.id)) continue;
@@ -115,7 +129,9 @@ export async function GET(req: Request) {
     ) {
       continue;
     }
-    filtered.push(scoreCandidate(rowToSummary(row), entries, top));
+    filtered.push(
+      scoreCandidate(rowToSummary(row), entries, top, filteredDeckKws),
+    );
   }
 
   // Sort: tiered (gold > silver > bronze) first, then by share count, then
