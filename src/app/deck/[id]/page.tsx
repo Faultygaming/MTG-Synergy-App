@@ -18,6 +18,7 @@ import { COMMON_KEYWORD_STOPLIST } from "@/lib/synergy/stoplist";
 import { DeckSidebar } from "@/components/DeckSidebar";
 import { SynergyMap } from "@/components/SynergyMap";
 import { RemovalPanel } from "@/components/RemovalPanel";
+import { DeckContentsPanel } from "@/components/DeckContentsPanel";
 import {
   formatViolation,
   isCandidateLegal,
@@ -264,6 +265,13 @@ export default async function DeckPage({
         {removalCandidates.length > 0 && (
           <RemovalPanel deckId={deck.id} candidates={removalCandidates} />
         )}
+        <DeckContentsPanel
+          deckId={deck.id}
+          entries={entries}
+          commanderIds={[deck.commanderId, deck.partnerId].filter(
+            (id): id is string => Boolean(id),
+          )}
+        />
       </aside>
     </main>
   );

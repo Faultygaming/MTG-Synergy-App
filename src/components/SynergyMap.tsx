@@ -24,6 +24,7 @@ import {
   type MapTop,
 } from "@/lib/synergy/map";
 import { buildExcludeSet } from "@/lib/synergy/stoplist";
+import { attachLivePhysics } from "./synergyLivePhysics";
 
 type LayoutMode = "pie" | "planetary" | "force";
 
@@ -478,6 +479,7 @@ export function SynergyMap({ entries, themes }: Props) {
 
   // Cytoscape ref + hover wiring -----------------------------------------
   const cyRef = useRef<Core | null>(null);
+  const livePhysicsCleanupRef = useRef<(() => void) | null>(null);
   function bindCy(cy: Core) {
     cyRef.current = cy;
     const onOver = (evt: EventObject) => {
@@ -497,6 +499,13 @@ export function SynergyMap({ entries, themes }: Props) {
     // for force-directed layouts is often "way off to the side" or
     // "zoomed in to a corner". 40px padding leaves breathing room.
     cy.off("layoutstop").on("layoutstop", () => cy.fit(undefined, 40));
+    // Live drag physics — neighbors push away fluidly, dragged card
+    // springs back to its anchor on release. Idempotent across re-
+    // attachments (bindCy can fire more than once in dev StrictMode).
+    if (livePhysicsCleanupRef.current) {
+      livePhysicsCleanupRef.current();
+    }
+    livePhysicsCleanupRef.current = attachLivePhysics(cy);
   }
 
   const hovered = hover ? cardIndex.get(hover.id) : null;

@@ -99,13 +99,20 @@ export async function GET(req: Request) {
   const commanders: CommanderLegalityCard[] = commanderRows.map(rowToLegality);
   const inDeck = new Set([...entries.map((e) => e.card.id), ...commanderIds]);
 
-  // SQLite contains() — Prisma exposes it on String columns. Case-
-  // insensitive on the unique index thanks to NOCASE collation in newer
-  // Prisma adapters (otherwise the user types "crucible" and misses
-  // "Crucible of Worlds"). Limit at the DB layer too so a wildcard
-  // query doesn't pull 30k rows.
+  // Match against BOTH name and the JSON-encoded keyword array. The
+  // latter lets the user type a keyword (e.g. "landfall", "etb-trigger")
+  // and surface every card with that keyword — not just the lone card
+  // whose printed name contains the substring. keywordsJson is stored
+  // lower-kebab-case (e.g. `["landfall","creature","produces-g"]`), so
+  // the query is lowercased before substring matching.
+  const qLower = q.toLowerCase();
   const matches = (await prisma.card.findMany({
-    where: { name: { contains: q } },
+    where: {
+      OR: [
+        { name: { contains: q } },
+        { keywordsJson: { contains: qLower } },
+      ],
+    },
     take: 300,
   })) as unknown as CardRow[];
 
