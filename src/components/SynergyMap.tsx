@@ -251,10 +251,20 @@ export function SynergyMap({ entries }: Props) {
     }
 
     // Optional keyword overlay — restores the bipartite view when toggled on.
+    // Applies the SAME filters as the card-edge path: drop stoplisted
+    // keywords, and drop keywords carried by fewer than MIN_CLUSTER cards
+    // (so a single-card keyword can't float in the canvas with one
+    // dangling line). Top-3 keywords (gold/silver/bronze) bypass the
+    // cluster floor — they're visible by user intent.
     if (showKeywords) {
       const seen = new Set<string>();
       for (const e of entries) {
         for (const k of e.card.keywords) {
+          if (excludeKeywords.has(k)) continue;
+          const count = keywordCounts.get(k) ?? 0;
+          const isTopKw =
+            k === top.primary || k === top.secondary || k === top.tertiary;
+          if (!isTopKw && count < MIN_CLUSTER) continue;
           if (!seen.has(k)) {
             seen.add(k);
             const tier =
