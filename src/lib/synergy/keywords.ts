@@ -46,6 +46,21 @@ const TYPELINE_NAMED_SUBTYPE_OWNERS = new Set([
 //   "Legendary Creature — Human Wizard" → ["human", "wizard"]
 // "Creature — Goblin" → ["goblin"]
 export function subtypesFromTypeLine(typeLine: string): string[] {
+  // MDFC / transforming DFC: "front // back" type_lines. Each face has
+  // its own type+subtype, so we process them independently. Without
+  // this, a Creature front with a Planeswalker back (Arlinn Kord,
+  // Garruk Relentless, Huatli, …) leaks the planeswalker character
+  // name through — only the FIRST face's `beforeDash` was inspected.
+  if (typeLine.includes("//")) {
+    const out = new Set<string>();
+    for (const face of typeLine.split("//")) {
+      for (const s of subtypesFromTypeLine(face.trim())) {
+        out.add(s);
+      }
+    }
+    return Array.from(out);
+  }
+
   // Scryfall uses either em-dash (—) or hyphen-minus depending on locale.
   const split = typeLine.split(/[—\-]/);
   if (split.length < 2) return [];
@@ -342,9 +357,13 @@ export function extractKeywords(
   }
 
   // 3. Supertype/type tokens before the dash (creature, instant, ...).
-  const beforeDash = (card.type_line ?? "").split(/[—\-]/)[0] ?? "";
-  for (const t of beforeDash.split(/\s+/).filter(Boolean)) {
-    out.add(normalizeKeyword(t));
+  // DFCs: process each face so a Creature // Planeswalker MDFC adds
+  // both "creature" and "planeswalker" tokens.
+  for (const face of (card.type_line ?? "").split("//")) {
+    const beforeDash = face.split(/[—\-]/)[0] ?? "";
+    for (const t of beforeDash.split(/\s+/).filter(Boolean)) {
+      out.add(normalizeKeyword(t));
+    }
   }
 
   // 4. produced_mana → color/mana-production tags. e.g. ["R"] → "produces-r".
@@ -352,17 +371,16 @@ export function extractKeywords(
     out.add(`produces-${normalizeKeyword(m)}`);
   }
 
-  // 4b. Mana fixing on lands. After the mana-rock fix, dual lands /
-  // tri-lands / Command Tower lose their (bogus) mana-rock tag and end
-  // up with NO archetype keyword — but they're load-bearing in any
-  // multi-color deck. A multi-color land is one with type "Land" and
-  // 2+ entries in produced_mana. Artifact mana fixers (Chromatic Lantern)
-  // are already covered by "mana-rock".
-  if (
-    /\bland\b/i.test(card.type_line ?? "") &&
-    (card.produced_mana?.length ?? 0) >= 2
-  ) {
-    out.add("mana-fixing");
+  // 4b. Mana fixing. Multi-color lands (Cinder Glade, Command Tower,
+  // triomes) and multi-color artifact rocks (Arcane Signet, Chromatic
+  // Lantern, Coalition Relic) all enable splashy mana bases. Rule:
+  // type_line is Land or Artifact AND produced_mana has 2+ entries.
+  // (Sol Ring, Mana Crypt — colorless-only — stay as just mana-rock.)
+  if ((card.produced_mana?.length ?? 0) >= 2) {
+    const tl = card.type_line ?? "";
+    if (/\bland\b/i.test(tl) || /\bartifact\b/i.test(tl)) {
+      out.add("mana-fixing");
+    }
   }
 
   // 5. Regex pack over oracle text.

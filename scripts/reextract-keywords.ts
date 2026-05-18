@@ -58,8 +58,26 @@ async function main() {
       },
       oracleTags,
     );
-    const merged = Array.from(new Set([...recomputed, ...carried])).sort();
+    const mergedSet = new Set([...recomputed, ...carried]);
 
+    // Synthesize "mana-fixing" from carried produces-* tags. The
+    // extractKeywords() call above can't compute this during reextract
+    // because produced_mana isn't stored on the Card row — but the
+    // carried-forward produces-r / produces-g / ... tags are equivalent
+    // evidence. Apply the same rule as the ingest path: 2+ colors on
+    // a Land or Artifact.
+    if (
+      /\bland\b/i.test(c.typeLine) ||
+      /\bartifact\b/i.test(c.typeLine)
+    ) {
+      let producesCount = 0;
+      for (const k of mergedSet) {
+        if (k.startsWith("produces-")) producesCount += 1;
+      }
+      if (producesCount >= 2) mergedSet.add("mana-fixing");
+    }
+
+    const merged = Array.from(mergedSet).sort();
     const oldSorted = [...existing].sort();
     if (
       merged.length === oldSorted.length &&
