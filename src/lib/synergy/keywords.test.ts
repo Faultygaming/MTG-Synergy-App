@@ -391,6 +391,43 @@ describe("extractKeywords", () => {
     expect(kws).not.toContain("mana-fixing");
   });
 
+  // Fetch lands and land-ramp spells used to get tagged ramp + tutor.
+  // The double-tag inflated the deck's tutor count enough to crowd
+  // real archetypes out of bronze tier in lands-matter decks.
+  it("strips tutor when ramp is set (fetch lands / land-ramp spells)", () => {
+    const fetch = extractKeywords({
+      keywords: [],
+      type_line: "Land",
+      oracle_text:
+        "When this land enters the battlefield, sacrifice it unless you pay {1}. {T}, Sacrifice this land: Search your library for a basic Plains, Island, Swamp, Mountain, or Forest card, put it onto the battlefield, then shuffle.",
+      produced_mana: [],
+    });
+    expect(fetch).toContain("ramp");
+    expect(fetch).not.toContain("tutor");
+
+    const farseek = extractKeywords({
+      keywords: [],
+      type_line: "Sorcery",
+      oracle_text:
+        "Search your library for a Plains, Island, Swamp, or Mountain card, put it onto the battlefield tapped, then shuffle.",
+      produced_mana: [],
+    });
+    expect(farseek).toContain("ramp");
+    expect(farseek).not.toContain("tutor");
+  });
+
+  it("keeps tutor for real card tutors (no land in search target)", () => {
+    const demonicTutor = extractKeywords({
+      keywords: [],
+      type_line: "Sorcery",
+      oracle_text:
+        "Search your library for a card, put that card into your hand, then shuffle.",
+      produced_mana: [],
+    });
+    expect(demonicTutor).toContain("tutor");
+    expect(demonicTutor).not.toContain("ramp");
+  });
+
   // DFC creature // planeswalker — both faces' supertype tokens should
   // surface (creature + planeswalker), but the planeswalker character
   // name on the back is stripped via subtypesFromTypeLine.
