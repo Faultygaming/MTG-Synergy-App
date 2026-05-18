@@ -12,51 +12,161 @@ import type { Core } from "cytoscape";
 // dragged, a requestAnimationFrame loop runs forces over the card
 // nodes:
 //
-//   - Anchor spring: each card is pulled toward its packed position
-//     (its "preferred location"). Strong by default, so the layout's
-//     visual structure is preserved across drags.
-//   - Repulsion: nearby cards push each other apart with inverse-
-//     square falloff. Cuts off beyond ~300px so distant cards don't
-//     leak forces across the canvas.
+//   - Anchor spring: each non-grabbed card is pulled toward its
+//     packed position (its "preferred location"). After a card is
+//     released, this is what snaps it back.
+//   - Repulsion: every pair of cards pushes apart with inverse-
+//     square falloff. Strong enough that dragging a card visibly
+//     shoves nearby neighbors aside.
 //   - Damping + velocity cap: keeps the simulation stable.
 //
-// The result: dragging pushes neighbors out of the way fluidly, then
-// when released, everything (including the dragged card) springs back
-// toward its anchor — matching the user's "snap back to preferred
-// location of connections" intent.
+// The loop sleeps once everything has come to rest, so idle cost is
+// zero between interactions.
+
+export interface PhysicsNode {
+  id: string;
+  x: number;
+  y: number;
+  grabbed: boolean;
+}
+
+export interface Vec2 {
+  x: number;
+  y: number;
+}
+
+export interface Velocity {
+  vx: number;
+  vy: number;
+}
+
+export interface PhysicsParams {
+  repulseK: number;
+  anchorK: number;
+  damping: number;
+  vmax: number;
+  // Hard cutoff on pairwise repulsion distance. Pairs farther apart
+  // than this skip the calculation entirely. Keep this generous —
+  // cards in a planetary anchor ring can be 400-700 model units
+  // apart even when they're visually adjacent on screen.
+  repulseRange: number;
+}
+
+export const DEFAULT_PARAMS: PhysicsParams = {
+  // Tuned 2026-05 after the initial physics PR shipped with values
+  // that were too weak to visibly displace neighbors. The push needs
+  // to be obvious or users assume the physics isn't running.
+  repulseK: 60000,
+  anchorK: 0.025,
+  damping: 0.78,
+  vmax: 40,
+  repulseRange: 600,
+};
+
+// Pure simulation step. Mutates `velocities` in place; returns the
+// new positions keyed by id (only non-grabbed nodes appear in the
+// result — caller skips applying positions for grabbed nodes).
 //
-// Loop lifecycle: starts on `grab`/`drag`/`free`, runs every frame
-// while any node is grabbed or the system's kinetic energy is above
-// a small threshold, then idles until the next interaction.
+// Exposed (not just internal to attachLivePhysics) so the math can be
+// exercised in unit tests without mocking the entire Cytoscape event
+// loop.
+export function stepPhysics(
+  nodes: ReadonlyArray<PhysicsNode>,
+  anchors: ReadonlyMap<string, Vec2>,
+  velocities: Map<string, Velocity>,
+  params: PhysicsParams = DEFAULT_PARAMS,
+): {
+  newPositions: Map<string, Vec2>;
+  totalKE: number;
+  anyGrabbed: boolean;
+} {
+  const { repulseK, anchorK, damping, vmax, repulseRange } = params;
+  const rangeSq = repulseRange * repulseRange;
+  const newPositions = new Map<string, Vec2>();
+
+  const forces: Array<Vec2> = new Array(nodes.length);
+  for (let i = 0; i < nodes.length; i++) forces[i] = { x: 0, y: 0 };
+
+  // Pairwise repulsion with distance cutoff.
+  for (let i = 0; i < nodes.length; i++) {
+    const a = nodes[i];
+    for (let j = i + 1; j < nodes.length; j++) {
+      const b = nodes[j];
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      const d2 = dx * dx + dy * dy + 1;
+      if (d2 > rangeSq) continue;
+      const d = Math.sqrt(d2);
+      const f = repulseK / d2;
+      const ux = dx / d;
+      const uy = dy / d;
+      forces[i].x += ux * f;
+      forces[i].y += uy * f;
+      forces[j].x -= ux * f;
+      forces[j].y -= uy * f;
+    }
+  }
+
+  // Anchor spring — pull each non-grabbed card back toward its
+  // packed position.
+  for (let i = 0; i < nodes.length; i++) {
+    const a = anchors.get(nodes[i].id);
+    if (!a) continue;
+    forces[i].x += anchorK * (a.x - nodes[i].x);
+    forces[i].y += anchorK * (a.y - nodes[i].y);
+  }
+
+  // Integrate.
+  let totalKE = 0;
+  let anyGrabbed = false;
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    if (n.grabbed) {
+      // Cytoscape controls the grabbed node's position from the
+      // pointer. Zero its velocity so it doesn't shoot off on
+      // release.
+      velocities.set(n.id, { vx: 0, vy: 0 });
+      anyGrabbed = true;
+      continue;
+    }
+    let v = velocities.get(n.id);
+    if (!v) {
+      v = { vx: 0, vy: 0 };
+      velocities.set(n.id, v);
+    }
+    v.vx = (v.vx + forces[i].x) * damping;
+    v.vy = (v.vy + forces[i].y) * damping;
+    const sp = Math.sqrt(v.vx * v.vx + v.vy * v.vy);
+    if (sp > vmax) {
+      v.vx = (v.vx / sp) * vmax;
+      v.vy = (v.vy / sp) * vmax;
+    }
+    totalKE += v.vx * v.vx + v.vy * v.vy;
+    newPositions.set(n.id, { x: n.x + v.vx, y: n.y + v.vy });
+  }
+
+  return { newPositions, totalKE, anyGrabbed };
+}
 
 interface State {
-  anchors: Map<string, { x: number; y: number }>;
-  velocities: Map<string, { vx: number; vy: number }>;
+  anchors: Map<string, Vec2>;
+  velocities: Map<string, Velocity>;
   rafId: number | null;
   active: boolean;
 }
 
-interface Options {
-  repulseK?: number;
-  anchorK?: number;
-  damping?: number;
-  vmax?: number;
-  // Pairs farther apart than `repulseRange` skip the repulsion
-  // calculation entirely. Avoids O(N²) blowup distorting the layout
-  // when one corner has dense neighbors.
-  repulseRange?: number;
-  // Kinetic energy below which the loop sleeps.
-  keThreshold?: number;
+interface AttachOptions extends Partial<PhysicsParams> {
+  // Optional sink for "physics is currently running" state. Lets the
+  // host component show a visible indicator so users can confirm the
+  // loop is alive when something seems wrong.
+  onActiveChange?: (active: boolean) => void;
 }
 
-export function attachLivePhysics(cy: Core, opts: Options = {}): () => void {
-  const REPULSE_K = opts.repulseK ?? 14000;
-  const ANCHOR_K = opts.anchorK ?? 0.06;
-  const DAMPING = opts.damping ?? 0.74;
-  const VMAX = opts.vmax ?? 30;
-  const REPULSE_RANGE = opts.repulseRange ?? 320;
-  const REPULSE_RANGE_SQ = REPULSE_RANGE * REPULSE_RANGE;
-  const KE_THRESHOLD = opts.keThreshold ?? 0.5;
+export function attachLivePhysics(
+  cy: Core,
+  opts: AttachOptions = {},
+): () => void {
+  const params: PhysicsParams = { ...DEFAULT_PARAMS, ...opts };
 
   const state: State = {
     anchors: new Map(),
@@ -64,6 +174,12 @@ export function attachLivePhysics(cy: Core, opts: Options = {}): () => void {
     rafId: null,
     active: false,
   };
+
+  function setActive(v: boolean) {
+    if (state.active === v) return;
+    state.active = v;
+    opts.onActiveChange?.(v);
+  }
 
   function snapshot() {
     state.anchors.clear();
@@ -76,16 +192,8 @@ export function attachLivePhysics(cy: Core, opts: Options = {}): () => void {
     });
   }
 
-  function step() {
-    // Collect card-node snapshots. We touch cytoscape's getters once
-    // per frame and write positions once at the end.
-    interface NodeView {
-      id: string;
-      x: number;
-      y: number;
-      grabbed: boolean;
-    }
-    const nodes: NodeView[] = [];
+  function loopStep() {
+    const nodes: PhysicsNode[] = [];
     cy.nodes().forEach((n) => {
       const id = String(n.id());
       if (!id.startsWith("card:")) return;
@@ -93,102 +201,50 @@ export function attachLivePhysics(cy: Core, opts: Options = {}): () => void {
       nodes.push({ id, x: pos.x, y: pos.y, grabbed: n.grabbed() });
     });
 
-    const forces: Array<{ fx: number; fy: number }> = new Array(nodes.length);
-    for (let i = 0; i < nodes.length; i++) forces[i] = { fx: 0, fy: 0 };
+    const { newPositions, totalKE, anyGrabbed } = stepPhysics(
+      nodes,
+      state.anchors,
+      state.velocities,
+      params,
+    );
 
-    // Pairwise repulsion with distance cutoff.
-    for (let i = 0; i < nodes.length; i++) {
-      const a = nodes[i];
-      for (let j = i + 1; j < nodes.length; j++) {
-        const b = nodes[j];
-        const dx = a.x - b.x;
-        const dy = a.y - b.y;
-        const d2 = dx * dx + dy * dy + 1;
-        if (d2 > REPULSE_RANGE_SQ) continue;
-        const d = Math.sqrt(d2);
-        const f = REPULSE_K / d2;
-        const ux = dx / d;
-        const uy = dy / d;
-        forces[i].fx += ux * f;
-        forces[i].fy += uy * f;
-        forces[j].fx -= ux * f;
-        forces[j].fy -= uy * f;
+    // Apply positions in a batch — cytoscape will redraw once.
+    cy.batch(() => {
+      for (const [id, pos] of newPositions) {
+        cy.getElementById(id).position(pos);
       }
-    }
+    });
 
-    // Anchor spring — pulls each card back toward its packed position.
-    for (let i = 0; i < nodes.length; i++) {
-      const a = state.anchors.get(nodes[i].id);
-      if (!a) continue;
-      forces[i].fx += ANCHOR_K * (a.x - nodes[i].x);
-      forces[i].fy += ANCHOR_K * (a.y - nodes[i].y);
-    }
-
-    // Integrate. Skip the dragged node — cytoscape moves it from the
-    // pointer position; we just zero its velocity so it doesn't shoot
-    // off when released.
-    let totalKE = 0;
-    let anyGrabbed = false;
-    for (let i = 0; i < nodes.length; i++) {
-      const n = nodes[i];
-      if (n.grabbed) {
-        state.velocities.set(n.id, { vx: 0, vy: 0 });
-        anyGrabbed = true;
-        continue;
-      }
-      let v = state.velocities.get(n.id);
-      if (!v) {
-        v = { vx: 0, vy: 0 };
-        state.velocities.set(n.id, v);
-      }
-      v.vx = (v.vx + forces[i].fx) * DAMPING;
-      v.vy = (v.vy + forces[i].fy) * DAMPING;
-      const sp = Math.sqrt(v.vx * v.vx + v.vy * v.vy);
-      if (sp > VMAX) {
-        v.vx = (v.vx / sp) * VMAX;
-        v.vy = (v.vy / sp) * VMAX;
-      }
-      totalKE += v.vx * v.vx + v.vy * v.vy;
-      cy.getElementById(n.id).position({
-        x: n.x + v.vx,
-        y: n.y + v.vy,
-      });
-    }
-
-    if (anyGrabbed || totalKE > KE_THRESHOLD) {
-      state.rafId = requestAnimationFrame(step);
+    if (anyGrabbed || totalKE > 0.5) {
+      state.rafId = requestAnimationFrame(loopStep);
     } else {
-      state.active = false;
+      setActive(false);
       state.rafId = null;
     }
   }
 
   function startLoop() {
     if (state.active) return;
-    state.active = true;
-    state.rafId = requestAnimationFrame(step);
+    setActive(true);
+    state.rafId = requestAnimationFrame(loopStep);
   }
 
-  // Re-snapshot anchors whenever the underlying packed layout finishes
-  // (mode switch, add/remove card) so cards spring back to the new
-  // positions, not the original ones.
   cy.on("layoutstop", snapshot);
   cy.on("grab", "node", startLoop);
-  cy.on("free", "node", startLoop);
   cy.on("drag", "node", startLoop);
-  // Snapshot once at initialization.
+  cy.on("free", "node", startLoop);
   cy.ready(snapshot);
   if (cy.nodes().length > 0) snapshot();
 
   return () => {
     cy.off("layoutstop", snapshot);
     cy.off("grab", "node", startLoop);
-    cy.off("free", "node", startLoop);
     cy.off("drag", "node", startLoop);
+    cy.off("free", "node", startLoop);
     if (state.rafId !== null) {
       cancelAnimationFrame(state.rafId);
       state.rafId = null;
     }
-    state.active = false;
+    setActive(false);
   };
 }

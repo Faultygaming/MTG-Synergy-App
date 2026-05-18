@@ -255,7 +255,7 @@ export default async function DeckPage({
         {/* Map: fixed 60vh on mobile so the sidebar is reachable below;
             flex-1 on desktop to fill the column. */}
         <div className="relative h-[60vh] min-h-0 md:h-auto md:flex-1">
-          <SynergyMap entries={entries} themes={mapThemes} />
+          <SynergyMap entries={entries} themes={mapThemes} deckId={deck.id} />
         </div>
       </section>
       <aside className="flex flex-col border-t border-ink-line bg-ink-soft md:border-l md:border-t-0">
