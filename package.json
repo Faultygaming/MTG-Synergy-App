@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "validate": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "test:watch": "vitest",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",

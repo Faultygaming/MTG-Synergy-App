@@ -31,16 +31,23 @@ pnpm install            # respects the preinstall guard
 pnpm dev                # Next.js on :3000
 pnpm build              # production build
 pnpm typecheck          # tsc --noEmit
-pnpm lint               # next lint
+pnpm lint               # eslint .
 pnpm test               # vitest run
 pnpm test path/to/file  # single test file
 pnpm test -t "tier"     # filter by test name substring
+pnpm validate           # lint + typecheck + test + build — MUST pass before pushing
 pnpm db:push            # apply prisma/schema.prisma to ./data/synergy.db
 pnpm db:studio          # open Prisma Studio
 pnpm seed               # load seeds/fixtures.json (~20 demo cards)
 pnpm ingest [--force]   # bulk-ingest Scryfall oracle_cards (~120MB download)
 pnpm ingest:tags [tag…] # ingest Scryfall oracle tags (otag:) for the curated list in seeds/oracle-tags.json (or a subset). Network-bound; run after `pnpm ingest`.
 ```
+
+**Pre-push discipline**: always run `pnpm validate` before `git push`.
+Skipping `pnpm lint` (which catches react/no-unescaped-entities and
+similar JSX issues that typecheck doesn't) has caused CI failures in
+the past. The `validate` script bundles the four checks CI will run
+into one command — green here means green there.
 
 First-time setup: `pnpm install && cp .env.example .env && pnpm db:push && pnpm seed && pnpm dev`.
 

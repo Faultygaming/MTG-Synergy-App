@@ -60,7 +60,7 @@ export default function RulesSettingsPlaygroundPage() {
           Side-by-side comparison of four UX designs for the Commander
           rules panel. Each variant is wired to local state only — no API
           calls. Try clicking around in each. Tell me which letter (A/B/C/D)
-          you want and I'll wire that variant into production at{" "}
+          you want and I&apos;ll wire that variant into production at{" "}
           <code className="text-stone-300">src/components/RulesConfigPanel.tsx</code>{" "}
           and delete the others.
         </p>
