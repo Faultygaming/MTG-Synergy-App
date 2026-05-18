@@ -17,13 +17,10 @@
  */
 import { writeFileSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
-import cytoscape from "cytoscape";
-import coseBilkent from "cytoscape-cose-bilkent";
 import { prisma } from "../src/lib/db";
 import {
   buildMapElements,
-  type MapNode,
-  type MapEdge,
+  packPieCloud,
   type MapTier,
 } from "../src/lib/synergy/map";
 import {
@@ -31,8 +28,6 @@ import {
   topThreeKeywords,
 } from "../src/lib/synergy/score";
 import type { DeckEntry } from "../src/lib/types";
-
-cytoscape.use(coseBilkent as Parameters<typeof cytoscape.use>[0]);
 
 const TIER_BORDER: Record<MapTier, string> = {
   gold: "#d4af37",
@@ -102,76 +97,21 @@ async function main() {
     { includeTier4: true },
   );
 
-  // Cytoscape headless with style enabled so sizes are read from data
-  // attributes via the stylesheet (same pattern as the React component).
-  const cy = cytoscape({
-    headless: true,
-    styleEnabled: true,
-    elements: [
-      ...nodes.map((n) => ({
-        group: "nodes" as const,
-        data: { id: n.id, w: n.width, h: n.height },
-      })),
-      ...edges.map((e, i) => ({
-        group: "edges" as const,
-        data: { id: `e${i}`, source: e.source, target: e.target },
-      })),
-    ],
-    style: [
-      {
-        selector: "node",
-        style: {
-          width: "data(w)" as unknown as number,
-          height: "data(h)" as unknown as number,
-        },
-      },
-    ],
+  // Same packing algorithm as the React component — pure-math, no
+  // headless cytoscape involved.
+  const packed = packPieCloud(
+    nodes.map((n) => ({
+      id: n.id,
+      width: n.width,
+      height: n.height,
+      tier: n.tier,
+      shareCount: n.shareCount,
+    })),
+  );
+  const positions = packed.map((p) => {
+    const node = nodes.find((n) => n.id === p.id)!;
+    return { node, x: p.x, y: p.y };
   });
-
-  // Run the layout and wait for it to settle. promiseOn('layoutstop')
-  // has historically been flaky in headless mode; use a manual stop
-  // callback with a 15s safety timeout instead.
-  await new Promise<void>((res, rej) => {
-    const layout = cy.layout({
-      name: "cose-bilkent",
-      animate: false,
-      padding: 40,
-      nodeRepulsion: 6000,
-      idealEdgeLength: 120,
-      edgeElasticity: 0.45,
-      nestingFactor: 0.1,
-      gravity: 0.8,
-      gravityRange: 2.5,
-      gravityRangeCompound: 1.5,
-      numIter: 3000,
-      tile: true,
-      tilingPaddingVertical: 12,
-      tilingPaddingHorizontal: 12,
-      nodeDimensionsIncludeLabels: true,
-    } as cytoscape.LayoutOptions);
-    const timer = setTimeout(() => {
-      console.warn("[preview] layout didn't emit layoutstop within 15s; using positions as-is");
-      res();
-    }, 15_000);
-    layout.one("layoutstop", () => {
-      clearTimeout(timer);
-      res();
-    });
-    try {
-      layout.run();
-    } catch (err) {
-      clearTimeout(timer);
-      rej(err);
-    }
-  });
-
-  // Compute bounding box from final node positions.
-  const positions = nodes
-    .map((n) => {
-      const node = cy.getElementById(n.id);
-      return { node: n, x: node.position("x"), y: node.position("y") };
-    })
-    .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
   const bb = positions.reduce(
     (acc, p) => ({
       minX: Math.min(acc.minX, p.x - p.node.width / 2),

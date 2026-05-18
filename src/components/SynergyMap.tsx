@@ -12,6 +12,7 @@ import type { DeckEntry } from "@/lib/types";
 import {
   classifyCard,
   edgeTier as edgeTierFn,
+  packPieCloud,
   sizeFor as sizeForFn,
   ART_ASPECT,
   type MapTier,
@@ -123,17 +124,34 @@ export function SynergyMap({ entries, top }: Props) {
   const elements = useMemo<ElementDefinition[]>(() => {
     const els: ElementDefinition[] = [];
 
-    // Card nodes, sized by tier band + share count.
+    // Card nodes, sized by tier band + share count, positioned via
+    // packPieCloud (one circular cloud, pie-sectors by tier, no overlap).
     const classified = entries.map((e) => ({
       entry: e,
       ...classifyCard(e.card.keywords, top),
     }));
-    for (const c of classified) {
+    const sizes = classified.map((c) => {
       const width = sizeForFn(c.tier, c.shareCount);
-      const height = Math.round(width / ART_ASPECT);
+      return { width, height: Math.round(width / ART_ASPECT) };
+    });
+    const packed = packPieCloud(
+      classified.map((c, i) => ({
+        id: c.entry.card.id,
+        width: sizes[i].width,
+        height: sizes[i].height,
+        tier: c.tier,
+        shareCount: c.shareCount,
+      })),
+    );
+    const positionById = new Map(packed.map((p) => [p.id, p]));
+
+    for (let i = 0; i < classified.length; i++) {
+      const c = classified[i];
+      const { width, height } = sizes[i];
       const img =
         artCropFor(c.entry.card.imageNormal) ||
         artCropFor(c.entry.card.imageSmall);
+      const pos = positionById.get(c.entry.card.id) ?? { x: 0, y: 0 };
       els.push({
         data: {
           id: `card:${c.entry.card.id}`,
@@ -144,6 +162,7 @@ export function SynergyMap({ entries, top }: Props) {
           width,
           height,
         },
+        position: { x: pos.x, y: pos.y },
       });
     }
 
@@ -413,29 +432,13 @@ export function SynergyMap({ entries, top }: Props) {
           stylesheet={stylesheet}
           layout={
             {
-              name: "cose-bilkent",
+              // packPieCloud computed the positions; cytoscape just
+              // honors them. No physics, no iterations — instant render
+              // with structurally-guaranteed no-overlap.
+              name: "preset",
               animate: false,
               padding: 40,
-              // Tuned for a 99-card commander deck. Lower nodeRepulsion
-              // + higher gravity than the previous pass — we'd rather a
-              // tight, packed cloud than a sprawling one that needs to
-              // be pan-zoomed. cy.fit() in bindCy then centers on the
-              // result so the user sees everything on first load.
-              nodeRepulsion: 6000,
-              idealEdgeLength: 120,
-              edgeElasticity: 0.45,
-              nestingFactor: 0.1,
-              gravity: 0.8,
-              gravityRange: 2.5,
-              gravityRangeCompound: 1.5,
-              numIter: 3000,
-              // tile=true packs disconnected components (cards with no
-              // shared keywords) into the empty regions of the main
-              // layout instead of shoving them off into the corners.
-              tile: true,
-              tilingPaddingVertical: 12,
-              tilingPaddingHorizontal: 12,
-              nodeDimensionsIncludeLabels: true,
+              fit: true,
             } as unknown as cytoscape.LayoutOptions
           }
           minZoom={0.2}
