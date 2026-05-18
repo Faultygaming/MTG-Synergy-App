@@ -456,9 +456,12 @@ export function packPlanetary(
     ),
   );
   // Anchor ring radius scales with deck size so a 99-card deck gets
-  // more room than a 19-card one.
+  // more room than a 19-card one. The 2026-05 bump (6→9, 300→420,
+  // 700→960) widens the ring so the big anchor cards are visibly
+  // spread apart with room for moons between them, instead of all
+  // crowding into the lower-left of the canvas.
   const anchorRadius =
-    options.anchorRadius ?? Math.max(300, Math.min(700, nodes.length * 6));
+    options.anchorRadius ?? Math.max(420, Math.min(960, nodes.length * 9));
 
   // Pick the K most "central" cards as anchors. Centrality here is a
   // tier-aware sort: gold cards first, then by shareCount, then by
