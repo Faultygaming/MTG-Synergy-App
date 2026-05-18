@@ -38,6 +38,7 @@
     "react": "^19.2.6",
     "react-cytoscapejs": "^2.0.0",
     "react-dom": "^19.2.6",
+    "tsx": "^4.19.2",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -50,7 +51,6 @@
     "eslint-config-next": "^16.2.6",
     "postcss": "^8.4.49",
     "tailwindcss": "^4.3.0",
-    "tsx": "^4.19.2",
     "typescript": "^6.0.3",
     "vite": "^8.0.13",
     "vitest": "^4.1.6"
