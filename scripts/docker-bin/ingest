@@ -1,0 +1,5 @@
+#!/bin/sh
+# Inside the container: download Scryfall's oracle_cards bulk file (~120 MB,
+# ~30k cards) and load it into SQLite. ~5–10 minutes on a typical LAN box.
+# Equivalent to `pnpm ingest` on a dev machine. Pass `--force` to re-download.
+exec node /app/node_modules/tsx/dist/cli.mjs /app/scripts/ingest-scryfall.ts "$@"

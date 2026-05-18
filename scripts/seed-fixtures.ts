@@ -11,7 +11,9 @@ import { extractKeywords } from "../src/lib/synergy/keywords";
 import type { ScryfallCard } from "../src/lib/scryfall";
 
 async function main() {
-  const path = resolve(process.cwd(), "data/fixtures.json");
+  // Fixtures are bundled with the image at /app/seeds/ in production, and
+  // at <repo>/seeds/ in dev. Both resolve from cwd via the same relative path.
+  const path = resolve(process.cwd(), "seeds/fixtures.json");
   const raw = await readFile(path, "utf8");
   const cards = JSON.parse(raw) as ScryfallCard[];
   console.log(`Loading ${cards.length} fixture cards...`);

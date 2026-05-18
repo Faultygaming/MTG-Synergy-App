@@ -37,9 +37,9 @@ pnpm test path/to/file  # single test file
 pnpm test -t "tier"     # filter by test name substring
 pnpm db:push            # apply prisma/schema.prisma to ./data/synergy.db
 pnpm db:studio          # open Prisma Studio
-pnpm seed               # load data/fixtures.json (~20 demo cards)
+pnpm seed               # load seeds/fixtures.json (~20 demo cards)
 pnpm ingest [--force]   # bulk-ingest Scryfall oracle_cards (~120MB download)
-pnpm ingest:tags [tag…] # ingest Scryfall oracle tags (otag:) for the curated list in data/oracle-tags.json (or a subset). Network-bound; run after `pnpm ingest`.
+pnpm ingest:tags [tag…] # ingest Scryfall oracle tags (otag:) for the curated list in seeds/oracle-tags.json (or a subset). Network-bound; run after `pnpm ingest`.
 ```
 
 First-time setup: `pnpm install && cp .env.example .env && pnpm db:push && pnpm seed && pnpm dev`.
@@ -173,11 +173,11 @@ paste-mode flow (`{ kind: "paste" }`) instead.
 
 The user's actual decklist (Hearthhull, the Worldseed / World Shaper
 precon, BRG) is captured as a plain-text fixture at
-`data/decks/hearthhull-world-shaper.txt` — that's the canonical demo
+`seeds/decks/hearthhull-world-shaper.txt` — that's the canonical demo
 deck for end-to-end tests.
 
 For the broader upgrade-pool (cards the CoolStuffInc article recommends),
-there's `data/world-shaper-upgrade-pool.json` and a resolver script
+there's `seeds/world-shaper-upgrade-pool.json` and a resolver script
 (`scripts/seed-upgrade-pool.ts`). Run with internet access:
 
 ```bash

@@ -1,0 +1,7 @@
+#!/bin/sh
+# Inside the container: pull Scryfall oracle tags (otag:*) for the curated
+# list in /app/data/oracle-tags.json and union them into each Card row's
+# keyword set. ~5–10 minutes. Run AFTER `ingest` so the corpus is in place.
+# Equivalent to `pnpm ingest:tags` on a dev machine. Pass tag names as args
+# to ingest only a subset.
+exec node /app/node_modules/tsx/dist/cli.mjs /app/scripts/ingest-oracle-tags.ts "$@"

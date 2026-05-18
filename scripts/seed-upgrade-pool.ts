@@ -6,7 +6,7 @@
  *
  *   pnpm tsx scripts/seed-upgrade-pool.ts
  *
- * The card name list lives in data/world-shaper-upgrade-pool.json and reflects
+ * The card name list lives in seeds/world-shaper-upgrade-pool.json and reflects
  * the upgrade recommendations from the CoolStuffInc article cited there.
  */
 import { readFile } from "node:fs/promises";
@@ -16,7 +16,7 @@ import { getCardByName, toCardSummary, sleep } from "../src/lib/scryfall";
 import { extractKeywords } from "../src/lib/synergy/keywords";
 
 async function main() {
-  const path = resolve(process.cwd(), "data/world-shaper-upgrade-pool.json");
+  const path = resolve(process.cwd(), "seeds/world-shaper-upgrade-pool.json");
   const { cards, commander } = JSON.parse(await readFile(path, "utf8")) as {
     cards: string[];
     commander: string;

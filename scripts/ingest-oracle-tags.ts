@@ -1,7 +1,7 @@
 /**
  * Ingest Scryfall oracle tags into the local DB.
  *
- * For each tag in data/oracle-tags.json, queries
+ * For each tag in seeds/oracle-tags.json, queries
  *   https://api.scryfall.com/cards/search?q=otag:<tag>
  * with pagination, accumulates a card-oracle-id → tags map, then writes
  * each card's tag array to `Card.oracleTagsJson`. After running this,
@@ -27,7 +27,8 @@ import { prisma } from "../src/lib/db";
 import { searchCards, sleep, type ScryfallCard } from "../src/lib/scryfall";
 
 async function loadTagList(): Promise<string[]> {
-  const path = resolve(process.cwd(), "data/oracle-tags.json");
+  // Curated tag list ships with the image at /app/seeds/.
+  const path = resolve(process.cwd(), "seeds/oracle-tags.json");
   const raw = JSON.parse(await readFile(path, "utf8")) as { tags: string[] };
   return raw.tags;
 }

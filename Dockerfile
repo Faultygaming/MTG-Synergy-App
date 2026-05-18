@@ -118,6 +118,24 @@ COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=nextjs:nodejs /app/prisma.config.ts ./prisma.config.ts
 
+# Maintenance scripts + their bundled fixture data. /app/seeds is
+# distinct from /app/data — the latter is the runtime VOLUME mount so
+# anything we put under it gets hidden once the user mounts a volume.
+# Read-only seed fixtures live in /app/seeds; SQLite + Scryfall bulk
+# downloads live in /app/data. src/ + tsconfig are needed because the
+# scripts import from src/lib/ via the @/ path alias.
+COPY --from=builder --chown=nextjs:nodejs /app/scripts ./scripts
+COPY --from=builder --chown=nextjs:nodejs /app/seeds ./seeds
+COPY --from=builder --chown=nextjs:nodejs /app/src ./src
+COPY --from=builder --chown=nextjs:nodejs /app/tsconfig.json ./tsconfig.json
+
+# Convenience wrappers so operators can type `seed`, `ingest`,
+# `ingest-tags` inside `docker compose exec app sh` instead of the full
+# `node /app/node_modules/tsx/dist/cli.mjs /app/scripts/<name>.ts`.
+COPY --chmod=755 scripts/docker-bin/seed /usr/local/bin/seed
+COPY --chmod=755 scripts/docker-bin/ingest /usr/local/bin/ingest
+COPY --chmod=755 scripts/docker-bin/ingest-tags /usr/local/bin/ingest-tags
+
 # Persistent SQLite + downloads location. Declared as a VOLUME so an
 # operator who forgets to mount one still gets a stable named volume.
 RUN mkdir -p /app/data && chown nextjs:nodejs /app/data

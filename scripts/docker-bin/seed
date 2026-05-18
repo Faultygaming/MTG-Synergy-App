@@ -1,0 +1,4 @@
+#!/bin/sh
+# Inside the container: load the bundled fixture cards into SQLite.
+# Equivalent to `pnpm seed` on a dev machine.
+exec node /app/node_modules/tsx/dist/cli.mjs /app/scripts/seed-fixtures.ts "$@"
