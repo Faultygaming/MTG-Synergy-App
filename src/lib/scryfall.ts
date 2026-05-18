@@ -71,6 +71,56 @@ export async function getCardByName(name: string): Promise<ScryfallCard | null> 
   return (await res.json()) as ScryfallCard;
 }
 
+// Resolve up to 75 card names per request via Scryfall's collection
+// endpoint — vastly faster than per-card `cards/named` lookups and the
+// only sane way to resolve a 99-card commander deck without tripping
+// the 10 req/s rate limit.
+//
+// Docs: https://scryfall.com/docs/api/cards/collection
+//
+// Returns the canonical Scryfall card list plus the verbatim list of
+// names the API couldn't match, so the caller can surface them as
+// missing cards.
+const COLLECTION_CHUNK = 75;
+
+export async function getCardsByNames(
+  names: string[],
+): Promise<{ found: ScryfallCard[]; notFound: string[] }> {
+  const found: ScryfallCard[] = [];
+  const notFound: string[] = [];
+  for (let i = 0; i < names.length; i += COLLECTION_CHUNK) {
+    const chunk = names.slice(i, i + COLLECTION_CHUNK);
+    const res = await fetch(`${BASE}/cards/collection`, {
+      method: "POST",
+      headers: { ...headers(), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        identifiers: chunk.map((name) => ({ name })),
+      }),
+    });
+    if (res.status === 429) {
+      throw new Error(
+        "Scryfall rate-limited the request. Wait ~60s and try again — or run `pnpm ingest` once to populate the local DB so future pastes don't hit the network.",
+      );
+    }
+    if (!res.ok) {
+      throw new Error(`Scryfall collection ${res.status}: ${await res.text()}`);
+    }
+    const body = (await res.json()) as {
+      data: ScryfallCard[];
+      not_found?: Array<{ name?: string }>;
+    };
+    found.push(...body.data);
+    notFound.push(
+      ...(body.not_found ?? []).map((x, idx) => x.name ?? chunk[idx] ?? ""),
+    );
+    // Polite gap between chunks. A single 99-card deck = 2 chunks → one
+    // ~110ms pause, imperceptible to the user but keeps us well under
+    // the 10 req/s ceiling even with concurrent users.
+    if (i + COLLECTION_CHUNK < names.length) await sleep(110);
+  }
+  return { found, notFound };
+}
+
 export async function searchCards(query: string, maxPages = 1): Promise<ScryfallCard[]> {
   const out: ScryfallCard[] = [];
   let url: string | undefined = `${BASE}/cards/search?q=${encodeURIComponent(query)}`;

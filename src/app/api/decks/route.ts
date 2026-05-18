@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { parseDecklist } from "@/lib/decklist";
-import { getCardByName, toCardSummary, type ScryfallCard } from "@/lib/scryfall";
+import {
+  getCardsByNames,
+  toCardSummary,
+  type ScryfallCard,
+} from "@/lib/scryfall";
 import { extractKeywords } from "@/lib/synergy/keywords";
 import { extractDeckId, importMoxfieldDeck } from "@/lib/moxfield";
 import {
@@ -39,18 +43,53 @@ const BodySchema = z.union([
 
 type Resolved = { cardId: string; quantity: number; card: CommanderLegalityCard };
 
-async function ensureCardInDb(name: string): Promise<Resolved | null> {
-  let card = await prisma.card.findUnique({ where: { name } });
-  if (!card) {
-    const sc = await getCardByName(name);
-    if (!sc) return null;
-    card = await upsertScryfallCard(sc);
+// Bulk-resolve a flat list of card names. Single round-trip to Scryfall
+// per 75 names instead of one per card. Cards already in the local DB
+// are reused without any network call; only the unknown ones hit
+// Scryfall via the collection endpoint.
+//
+// Returns a Map keyed by the canonical Scryfall card name so callers can
+// look up by their pasted-in name (case-insensitive collation handled
+// by SQLite's NOCASE collation on the unique index — see schema.prisma).
+async function resolveCardsByName(
+  names: string[],
+): Promise<{ byName: Map<string, Awaited<ReturnType<typeof prisma.card.findUnique>>>; missing: string[] }> {
+  const unique = Array.from(new Set(names));
+  if (unique.length === 0) return { byName: new Map(), missing: [] };
+
+  // First pass: look up everything in one DB query.
+  const existing = await prisma.card.findMany({
+    where: { name: { in: unique } },
+  });
+  const byName = new Map<string, Awaited<ReturnType<typeof prisma.card.findUnique>>>();
+  for (const c of existing) byName.set(c.name, c);
+
+  // Second pass: anything we still don't have, bulk-fetch from Scryfall.
+  const missingFromDb = unique.filter((n) => !byName.has(n));
+  const missing: string[] = [];
+  if (missingFromDb.length > 0) {
+    let fetched: { found: ScryfallCard[]; notFound: string[] };
+    try {
+      fetched = await getCardsByNames(missingFromDb);
+    } catch (err) {
+      throw new Error(
+        err instanceof Error ? err.message : "Scryfall lookup failed",
+      );
+    }
+    for (const sc of fetched.found) {
+      const row = await upsertScryfallCard(sc);
+      byName.set(row.name, row);
+      // Also map the original requested name (Scryfall normalizes
+      // casing & punctuation, so the user's "lightning bolt" lookup
+      // would otherwise miss).
+      const requested = missingFromDb.find(
+        (n) => n.toLowerCase() === sc.name.toLowerCase(),
+      );
+      if (requested && requested !== sc.name) byName.set(requested, row);
+    }
+    missing.push(...fetched.notFound);
   }
-  return {
-    cardId: card.id,
-    quantity: 1,
-    card: rowToLegalityCard(card),
-  };
+  return { byName, missing };
 }
 
 function rowToLegalityCard(card: {
@@ -178,33 +217,36 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Decklist is empty." }, { status: 400 });
   }
 
-  const missing: string[] = [];
+  // Bulk-resolve ALL names (commanders + mainboard) in a single pass.
+  // This collapses ~100 sequential Scryfall calls into 2 (one per 75-card
+  // chunk), which is what keeps a 99-card-deck paste under the rate limit.
+  const allNames = [...commanderNames, ...lines.map((l) => l.name)];
+  let resolution: { byName: Map<string, Awaited<ReturnType<typeof prisma.card.findUnique>>>; missing: string[] };
+  try {
+    resolution = await resolveCardsByName(allNames);
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Card lookup failed" },
+      { status: 502 },
+    );
+  }
+  const { byName, missing } = resolution;
 
-  // Resolve commanders.
+  // Commanders.
   const commanderCards: CommanderLegalityCard[] = [];
   const commanderIds: string[] = [];
   for (const cn of commanderNames) {
-    const r = await ensureCardInDb(cn);
-    if (!r) {
-      missing.push(cn);
-      continue;
-    }
-    commanderCards.push(r.card);
-    commanderIds.push(r.cardId);
+    const card = byName.get(cn);
+    if (!card) continue; // already accounted for in `missing`
+    commanderCards.push(rowToLegalityCard(card));
+    commanderIds.push(card.id);
   }
 
-  // Resolve mainboard.
+  // Mainboard.
   const resolved: Resolved[] = [];
   for (const line of lines) {
-    let card = await prisma.card.findUnique({ where: { name: line.name } });
-    if (!card) {
-      const sc = await getCardByName(line.name);
-      if (!sc) {
-        missing.push(line.name);
-        continue;
-      }
-      card = await upsertScryfallCard(sc);
-    }
+    const card = byName.get(line.name);
+    if (!card) continue; // already in `missing`
     resolved.push({
       cardId: card.id,
       quantity: line.quantity,

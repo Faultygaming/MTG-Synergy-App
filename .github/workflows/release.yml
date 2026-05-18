@@ -32,7 +32,14 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  # GHCR requires lowercase image names but ${{ github.repository }}
+  # preserves the original case ("Faultygaming/MTG-Synergy-App"), which
+  # causes:
+  #   ERROR: invalid reference format: repository name must be lowercase
+  # docker/metadata-action lowercases internally, but the outputs:/
+  # imagetools commands use this raw env var directly, so we lowercase
+  # it once here. Update if the repo gets renamed.
+  IMAGE_NAME: faultygaming/mtg-synergy-app
 
 jobs:
   build:
