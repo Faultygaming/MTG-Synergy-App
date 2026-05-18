@@ -449,28 +449,22 @@ export function SynergyMap({ entries, top }: Props) {
 
       {/* Magnified hover overlay --------------------------------------- */}
       {showOverlay ? (
-        <div
-          className="pointer-events-none absolute z-20"
-          style={{
-            // Offset so the magnified card doesn't sit directly under the
-            // cursor (would prevent mouseout from firing on the underlying
-            // node). Use the node's rendered position + a small offset.
-            left: hover!.x + 18,
-            top: hover!.y - 168,
-          }}
-        >
+        // Centered overlay fixed to the viewport. The image scales to
+        // the smaller of (viewport - 80px) on each axis while preserving
+        // the card's natural aspect ratio. pointer-events-none keeps the
+        // mouseout event on the underlying node firing so dismissal
+        // works as soon as the cursor leaves.
+        <div className="pointer-events-none fixed inset-0 z-20 flex items-center justify-center p-10">
           <div className="rounded-md border border-tier-gold/60 bg-ink-soft p-1 shadow-tier-gold">
             {hovered!.imageNormal ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={hovered!.imageNormal}
                 alt={hovered!.name}
-                width={240}
-                height={336}
-                className="block rounded"
+                className="block max-h-[calc(100vh-80px)] max-w-[calc(100vw-80px)] rounded"
               />
             ) : (
-              <div className="flex h-[336px] w-[240px] items-center justify-center rounded bg-ink p-2 text-center text-xs text-stone-400">
+              <div className="flex h-[calc(min(100vh-80px,680px))] w-[calc(min(100vw-80px,488px))] items-center justify-center rounded bg-ink p-2 text-center text-xs text-stone-400">
                 {hovered!.name}
               </div>
             )}
