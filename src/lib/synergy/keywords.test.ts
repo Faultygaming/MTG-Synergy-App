@@ -35,6 +35,14 @@ describe("subtypesFromTypeLine", () => {
     expect(subtypesFromTypeLine("Dungeon — Lost Mine of Phandelver")).toEqual([]);
     expect(subtypesFromTypeLine("Conspiracy — Hidden Agenda")).toEqual([]);
   });
+
+  // Planeswalker subtypes are character names ("Calix", "Dakkon",
+  // "Jeska", "Niko"). Same one-off-noise problem as plane names.
+  it("drops planeswalker character-name subtypes", () => {
+    expect(subtypesFromTypeLine("Legendary Planeswalker — Calix")).toEqual([]);
+    expect(subtypesFromTypeLine("Legendary Planeswalker — Jeska")).toEqual([]);
+    expect(subtypesFromTypeLine("Planeswalker — Dakkon")).toEqual([]);
+  });
 });
 
 describe("extractKeywords", () => {
@@ -230,6 +238,92 @@ describe("extractKeywords", () => {
     });
     expect(kws).toContain("cost-reduction");
     expect(kws).not.toContain("tribal-cost-reduction");
+  });
+
+  // X-damage and "deals damage equal to ..." spells were missed by the
+  // old damage-removal regex (literal-digit only).
+  it("tags Worldsoul's Rage (X-damage) with damage-removal", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Sorcery",
+      oracle_text:
+        "Worldsoul's Rage deals X damage to any target. Put up to X land cards from your hand and/or graveyard onto the battlefield tapped.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("damage-removal");
+  });
+
+  it("tags Torrent of Fire ('deals damage equal to') with damage-removal", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Sorcery",
+      oracle_text:
+        "Torrent of Fire deals damage to any target equal to the greatest mana value among permanents you control.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("damage-removal");
+  });
+
+  // "Destroy each ..." and damage-based sweepers were missed by the
+  // old board-wipe regex.
+  it("tags Gaze of Granite ('destroy each nonland permanent') with board-wipe", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Sorcery",
+      oracle_text: "Destroy each nonland permanent with mana value X or less.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("board-wipe");
+  });
+
+  it("tags Blasphemous Act (damage to each creature) with board-wipe", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Sorcery",
+      oracle_text:
+        "This spell costs {1} less to cast for each creature on the battlefield. Blasphemous Act deals 13 damage to each creature.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("board-wipe");
+  });
+
+  // Multi-color lands (Command Tower, Cinder Glade, triomes, fetches
+  // that produce two colors) used to be falsely tagged "mana-rock".
+  // After context-aware mana-rock, they need a positive label —
+  // "mana-fixing" — so they still surface as load-bearing deck pieces.
+  it("tags Cinder Glade (dual land) with mana-fixing, not mana-rock", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Land — Mountain Forest",
+      oracle_text:
+        "({T}: Add {R} or {G}.) This land enters tapped unless you control two or more basic lands.",
+      produced_mana: ["R", "G"],
+    });
+    expect(kws).toContain("mana-fixing");
+    expect(kws).not.toContain("mana-rock");
+  });
+
+  it("tags Command Tower (5-color land) with mana-fixing", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Land",
+      oracle_text:
+        "{T}: Add one mana of any color in your commander's color identity.",
+      produced_mana: ["W", "U", "B", "R", "G"],
+    });
+    expect(kws).toContain("mana-fixing");
+    expect(kws).not.toContain("mana-rock");
+  });
+
+  it("does NOT tag basic Forest with mana-fixing (single color)", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Basic Land — Forest",
+      oracle_text: "({T}: Add {G}.)",
+      produced_mana: ["G"],
+    });
+    expect(kws).not.toContain("mana-fixing");
+    expect(kws).not.toContain("mana-rock");
   });
 
   it("tags Exploration with extra-land-drops", () => {

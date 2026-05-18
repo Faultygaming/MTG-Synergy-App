@@ -35,6 +35,11 @@ const TYPELINE_NAMED_SUBTYPE_OWNERS = new Set([
   "vanguard",
   "hero",
   "card", // very old "Card — Foo" relics
+  // Planeswalker subtypes are character names ("Calix", "Dakkon",
+  // "Jeska", …). With ~1 card per name they create one-off noise the
+  // same way plane names do. Superfriends synergy is still captured by
+  // the "planeswalker" type token harvested from BEFORE the em-dash.
+  "planeswalker",
 ]);
 
 // Subtypes after the em-dash in a type_line, e.g.
@@ -152,12 +157,24 @@ const ORACLE_TEXT_PATTERNS: Array<{ keyword: string; pattern: RegExp }> = [
   // ── Removal / interaction ─────────────────────────────────────────
   { keyword: "removal-targeted",  pattern: /destroy target|exile target (creature|permanent|nonland)/i },
   { keyword: "bounce",            pattern: /return\s+target\s+[^.]{1,40}?to\s+(?:its|their)\s+owner's\s+hand|return\s+target\s+[^.]{1,40}?to\s+your\s+hand/i },
-  { keyword: "board-wipe",        pattern: /destroy all|exile all/i },
+  // Board wipe: catches "Destroy all creatures" (Wrath), "Exile all
+  // multicolored permanents" (Ravnica at War), "Destroy each nonland
+  // permanent" (Gaze of Granite), and damage-based sweepers like
+  // Blasphemous Act ("deals 13 damage to each creature") and
+  // Planetary Annihilation ("deals 6 damage to each creature").
+  { keyword: "board-wipe",        pattern: /destroy all|exile all|destroy each [^.]{0,30}?(?:creature|permanent|nonland)|deals?\s+(?:\d+|x)\s+damage\s+to\s+each\s+(?:creature|player|opponent)/i },
   { keyword: "mass-artifact-removal", pattern: /destroy all artifacts|exile all artifacts/i },
   { keyword: "mass-enchantment-removal", pattern: /destroy all enchantments|exile all enchantments/i },
   { keyword: "edict",             pattern: /each\s+(?:player|opponent)\s+sacrifices\s+a\s+creature|target\s+(?:player|opponent)\s+sacrifices/i },
   { keyword: "fight",             pattern: /\bfights?\s+(?:another|target)\s+creature\b/i },
-  { keyword: "damage-removal",    pattern: /deals?\s+\d+\s+damage\s+to\s+(?:any target|target creature)/i },
+  // Damage-removal: previously required a literal digit ("deals 3
+  // damage to ..."), missing X-spells (Worldsoul's Rage, Banefire) and
+  // "deals damage to any target equal to ..." (Torrent of Fire). The
+  // amount segment is now optional and accepts \d+ / x / that much.
+  // We still require "any target" or "target ..." as the destination
+  // so combat-damage triggers ("whenever this creature deals damage to
+  // a player") don't false-fire.
+  { keyword: "damage-removal",    pattern: /deals?\s+(?:(?:\d+|x|that much)\s+)?damage\s+to\s+(?:any target|target)/i },
   { keyword: "counterspell",      pattern: /counter target/i },
   { keyword: "cant-be-countered", pattern: /can't be countered/i },
 
@@ -333,6 +350,19 @@ export function extractKeywords(
   // 4. produced_mana → color/mana-production tags. e.g. ["R"] → "produces-r".
   for (const m of card.produced_mana ?? []) {
     out.add(`produces-${normalizeKeyword(m)}`);
+  }
+
+  // 4b. Mana fixing on lands. After the mana-rock fix, dual lands /
+  // tri-lands / Command Tower lose their (bogus) mana-rock tag and end
+  // up with NO archetype keyword — but they're load-bearing in any
+  // multi-color deck. A multi-color land is one with type "Land" and
+  // 2+ entries in produced_mana. Artifact mana fixers (Chromatic Lantern)
+  // are already covered by "mana-rock".
+  if (
+    /\bland\b/i.test(card.type_line ?? "") &&
+    (card.produced_mana?.length ?? 0) >= 2
+  ) {
+    out.add("mana-fixing");
   }
 
   // 5. Regex pack over oracle text.
