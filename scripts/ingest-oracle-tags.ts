@@ -1,105 +1,98 @@
 /**
- * Ingest Scryfall oracle tags into the local DB.
+ * Apply the precomputed oracle-tag map (seeds/oracle-tags-map.json) to
+ * the local DB. Fast and offline — no Scryfall calls.
  *
- * For each tag in seeds/oracle-tags.json, queries
- *   https://api.scryfall.com/cards/search?q=otag:<tag>
- * with pagination, accumulates a card-oracle-id → tags map, then writes
- * each card's tag array to `Card.oracleTagsJson`. After running this,
- * re-run `pnpm seed` (or any extractKeywords path) and the oracle tags
- * will union into the per-card keyword set as `otag:*`.
+ *   pnpm ingest:tags
  *
- * Network-bound — must be run from an environment that can reach
- * api.scryfall.com (the sandboxed Claude Code env cannot). Polite by
- * default: ~120ms between paginated requests, custom User-Agent.
+ * The map is built once on a dev machine (or in scheduled CI) via
+ * `pnpm tags:build`; this runtime command just reads + applies it. See
+ * scripts/tags-build.ts for the network-bound builder.
  *
- * Usage:
- *   pnpm tsx scripts/ingest-oracle-tags.ts                    # all tags
- *   pnpm tsx scripts/ingest-oracle-tags.ts ramp removal       # subset
- *
- * Expected runtime: ~5–10 minutes for the full curated list against a
- * fully-ingested DB. The Card row must exist (via `pnpm ingest` or per-card
- * lookups) for tags to land; cards Scryfall returns that aren't in our DB
- * are skipped with a counter at the end.
+ * For each Card row in the DB, looks up the precomputed tags by
+ * oracle_id and writes them to `oracleTagsJson`. Also re-unions the
+ * tags into the card's `keywordsJson` as `otag:*` so the synergy ranker
+ * picks them up without a re-extract.
  */
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { prisma } from "../src/lib/db";
-import { searchCards, sleep, type ScryfallCard } from "../src/lib/scryfall";
 
-async function loadTagList(): Promise<string[]> {
-  // Curated tag list ships with the image at /app/seeds/.
-  const path = resolve(process.cwd(), "seeds/oracle-tags.json");
-  const raw = JSON.parse(await readFile(path, "utf8")) as { tags: string[] };
-  return raw.tags;
+interface OracleTagsMap {
+  version: 1;
+  generatedAt: string | null;
+  tagDigests: Record<string, { count: number; digest: string }>;
+  cardTags: Record<string, string[]>;
 }
 
+// Optional override: `--file <path>` loads a tag-map from anywhere
+// (used by validate-scripts.ts to feed a synthetic map without polluting
+// the seeds/ directory).
+const FILE_FLAG_IDX = process.argv.indexOf("--file");
+const FILE_OVERRIDE =
+  FILE_FLAG_IDX > -1 ? process.argv[FILE_FLAG_IDX + 1] : null;
+
 async function main() {
-  const all = await loadTagList();
-  const argv = process.argv.slice(2);
-  const tags = argv.length > 0 ? argv : all;
-  console.log(`Ingesting ${tags.length} oracle tag(s)...`);
+  const mapPath = FILE_OVERRIDE
+    ? resolve(FILE_OVERRIDE)
+    : resolve(process.cwd(), "seeds/oracle-tags-map.json");
+  const raw = await readFile(mapPath, "utf8");
+  const map = JSON.parse(raw) as OracleTagsMap;
 
-  // Card oracle_id → Set<tag>
-  const cardTags = new Map<string, Set<string>>();
-  let totalHits = 0;
-  let totalSkipped = 0;
-
-  for (const [i, tag] of tags.entries()) {
-    process.stdout.write(`[${i + 1}/${tags.length}] otag:${tag} ... `);
-    let cards: ScryfallCard[];
-    try {
-      // 10 pages × ~175 cards/page = 1,750 cards max per tag. Few tags
-      // have more than that; cap is a guardrail more than a real limit.
-      cards = await searchCards(`otag:${tag}`, 10);
-    } catch (err) {
-      console.warn(`  failed: ${(err as Error).message}`);
-      await sleep(500);
-      continue;
-    }
-    console.log(`${cards.length} cards`);
-    totalHits += cards.length;
-    for (const c of cards) {
-      const id = c.oracle_id ?? c.id;
-      if (!cardTags.has(id)) cardTags.set(id, new Set());
-      cardTags.get(id)!.add(tag);
-    }
-    // Inter-tag courtesy beat in addition to per-page sleeping inside
-    // searchCards. Bumped from 200ms → 500ms; the previous setting was
-    // brushing the 10 req/s ceiling and triggering 429s after ~8 tags
-    // on real runs. The full 58-tag pass takes ~8-10 minutes at this
-    // rate but completes without rate-limiting.
-    await sleep(500);
-  }
-
-  console.log(`\nApplying tags to ${cardTags.size} cards in the DB...`);
-  let applied = 0;
-  for (const [oracleId, tagSet] of cardTags) {
-    const existing = await prisma.card.findUnique({
-      where: { id: oracleId },
-      select: { id: true, keywordsJson: true, oracleTagsJson: true },
-    });
-    if (!existing) {
-      totalSkipped += 1;
-      continue;
-    }
-    const tagList = Array.from(tagSet).sort();
-    // Union new tags into the keyword set as otag:* so the synergy ranker
-    // picks them up without a follow-up pass.
-    const keywords = new Set(JSON.parse(existing.keywordsJson) as string[]);
-    for (const t of tagList) keywords.add(`otag:${t}`);
-    await prisma.card.update({
-      where: { id: existing.id },
-      data: {
-        oracleTagsJson: JSON.stringify(tagList),
-        keywordsJson: JSON.stringify(Array.from(keywords).sort()),
-      },
-    });
-    applied += 1;
-    if (applied % 200 === 0) console.log(`  ${applied}/${cardTags.size}`);
+  if (!map.generatedAt || Object.keys(map.cardTags).length === 0) {
+    console.log(
+      "seeds/oracle-tags-map.json is empty. Run `pnpm tags:build` on a machine with internet access to populate it (see scripts/tags-build.ts).",
+    );
+    return;
   }
 
   console.log(
-    `\nDone. ${totalHits} tag-card hits across ${tags.length} tags; ${applied} cards updated, ${totalSkipped} skipped (not in local DB — run \`pnpm ingest\` first).`,
+    `Applying tag map generated ${map.generatedAt} (${Object.keys(map.cardTags).length} cards, ${Object.keys(map.tagDigests).length} tags)...`,
+  );
+
+  const cardIds = Object.keys(map.cardTags);
+  // findMany in chunks so we don't OOM on a 30k corpus.
+  const CHUNK = 500;
+  let applied = 0;
+  let skipped = 0;
+  for (let i = 0; i < cardIds.length; i += CHUNK) {
+    const ids = cardIds.slice(i, i + CHUNK);
+    const cards = await prisma.card.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, keywordsJson: true },
+    });
+    const byId = new Map(cards.map((c) => [c.id, c]));
+    for (const id of ids) {
+      const tags = map.cardTags[id];
+      const row = byId.get(id);
+      if (!row) {
+        skipped += 1;
+        continue;
+      }
+      // Union the otag:* tags into the existing keyword set. Replace
+      // any prior otag:* (so removed tags actually disappear), preserve
+      // every non-otag keyword (printed mechanics, regex-pack matches,
+      // type-line tokens).
+      const existingKeywords = JSON.parse(row.keywordsJson) as string[];
+      const merged = new Set(
+        existingKeywords.filter((k) => !k.startsWith("otag:")),
+      );
+      for (const t of tags) merged.add(`otag:${t}`);
+      await prisma.card.update({
+        where: { id },
+        data: {
+          oracleTagsJson: JSON.stringify(tags.sort()),
+          keywordsJson: JSON.stringify(Array.from(merged).sort()),
+        },
+      });
+      applied += 1;
+    }
+    if (Math.floor((i + CHUNK) / CHUNK) % 10 === 0) {
+      console.log(`  ${Math.min(i + CHUNK, cardIds.length)}/${cardIds.length}`);
+    }
+  }
+
+  console.log(
+    `Done. ${applied} cards tagged, ${skipped} skipped (not in local DB — run \`ingest\` first to populate the corpus).`,
   );
 }
 

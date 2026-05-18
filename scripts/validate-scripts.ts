@@ -167,6 +167,37 @@ async function run() {
     bulkPath,
   ]);
 
+  console.log("\ningest-oracle-tags.ts (offline, file-based)");
+  // Empty stub: should print friendly message + exit 0.
+  step("apply empty tag-map stub (must not crash)", [
+    "scripts/ingest-oracle-tags.ts",
+  ]);
+  // Populated synthetic map: tag two of the cards we just ingested.
+  const tagMapPath = join(tmpDir, "synth-tags.json");
+  writeFileSync(
+    tagMapPath,
+    JSON.stringify({
+      version: 1,
+      generatedAt: new Date().toISOString(),
+      tagDigests: { ramp: { count: 1, digest: "abc" }, removal: { count: 1, digest: "def" } },
+      cardTags: {
+        "real-scryfall-id-foo-bar": ["ramp"],
+        "real-scryfall-id-baz-quux": ["removal", "counterspell"],
+      },
+    }),
+  );
+  step("apply populated tag-map (must apply to existing cards)", [
+    "scripts/ingest-oracle-tags.ts",
+    "--file",
+    tagMapPath,
+  ]);
+  // Re-run to check idempotency (no orphaned otag:* from removed tags).
+  step("re-apply tag-map (idempotent)", [
+    "scripts/ingest-oracle-tags.ts",
+    "--file",
+    tagMapPath,
+  ]);
+
   console.log("\npreview-map.ts");
   step("build a preview deck from current DB", [
     "scripts/seed-preview-deck.ts",
