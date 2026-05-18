@@ -10,10 +10,38 @@ import type {
 } from "cytoscape";
 import type { DeckEntry } from "@/lib/types";
 
-// react-cytoscapejs must be client-only (touches `window`).
-const CytoscapeComponent = dynamic(() => import("react-cytoscapejs"), {
-  ssr: false,
-});
+// react-cytoscapejs must be client-only (touches `window`). We also
+// register the cose-bilkent layout extension here so it's available
+// inside the synergy map — produces noticeably better-packed clusters
+// than plain `cose` at the 99-card-plus-edges scale we render.
+const CytoscapeComponent = dynamic(
+  async () => {
+    const [{ default: cytoscape }, { default: coseBilkent }, mod] = await Promise.all([
+      import("cytoscape"),
+      import("cytoscape-cose-bilkent"),
+      import("react-cytoscapejs"),
+    ]);
+    // cose-bilkent has no published types; the extension is a function
+    // matching cytoscape's Ext signature at runtime.
+    cytoscape.use(coseBilkent as Parameters<typeof cytoscape.use>[0]);
+    return mod;
+  },
+  { ssr: false },
+);
+
+// Scryfall image URLs follow a stable size segment, so we can derive an
+// art-crop URL from the normal URL by string replacement. Art crops drop
+// the text box entirely — much more readable as cloud nodes than the full
+// card. The hover overlay still shows the full normal-size card.
+function artCropFor(url: string | null | undefined): string {
+  if (!url) return "";
+  return url.replace("/normal/", "/art_crop/").replace("/small/", "/art_crop/");
+}
+
+// Card art is roughly 4:3 landscape in art_crop. Forcing width/height
+// from a single size value would crop the art; use this ratio to derive
+// height from width.
+const ART_ASPECT = 4 / 3;
 
 interface Top {
   primary?: string;
@@ -30,11 +58,12 @@ interface Props {
 // ranker holds visually: a gold card with any shareCount is always bigger
 // than a silver card with any shareCount. Within a band, share count
 // (number of deck top-3 keywords this card carries) picks the size.
+// Values are node WIDTHS in pixels; height is width / ART_ASPECT.
 const SIZE_BANDS = {
-  gold:   { min: 64, max: 104 },
-  silver: { min: 42, max: 60 },
-  bronze: { min: 28, max: 40 },
-  none:   { min: 18, max: 26 },
+  gold:   { min: 88, max: 132 },
+  silver: { min: 60, max: 80 },
+  bronze: { min: 42, max: 56 },
+  none:   { min: 28, max: 36 },
 } as const;
 
 type CardTier = keyof typeof SIZE_BANDS;
@@ -150,15 +179,20 @@ export function SynergyMap({ entries, top }: Props) {
       ...classifyDeckCard(e.card.keywords, top),
     }));
     for (const c of classified) {
-      const size = sizeFor(c.tier, c.shareCount);
+      const width = sizeFor(c.tier, c.shareCount);
+      const height = Math.round(width / ART_ASPECT);
+      const img =
+        artCropFor(c.entry.card.imageNormal) ||
+        artCropFor(c.entry.card.imageSmall);
       els.push({
         data: {
           id: `card:${c.entry.card.id}`,
           label: c.entry.card.name,
           kind: "card",
-          image: c.entry.card.imageNormal ?? c.entry.card.imageSmall ?? "",
+          image: img,
           tier: c.tier,
-          size,
+          width,
+          height,
         },
       });
     }
@@ -219,7 +253,8 @@ export function SynergyMap({ entries, top }: Props) {
 
   const stylesheet: StylesheetStyle[] = useMemo(
     () => [
-      // Card nodes: image fill, square frame, size driven by `data(size)`.
+      // Card nodes: art-crop image fill, landscape frame, name label
+      // beneath. Size driven from data so React owns the math.
       {
         selector: "node[kind = 'card']",
         style: {
@@ -228,24 +263,51 @@ export function SynergyMap({ entries, top }: Props) {
           "background-fit": "cover",
           "border-color": "#2a2a30",
           "border-width": 1,
-          label: "",
-          width: "data(size)" as unknown as number,
-          height: ("data(size)" as unknown as number),
+          label: "data(label)",
+          color: "#71717a",
+          "font-size": 8,
+          "font-family": "ui-sans-serif, system-ui, sans-serif",
+          "text-valign": "bottom" as const,
+          "text-halign": "center" as const,
+          "text-margin-y": 6,
+          "text-max-width": "120px",
+          "text-wrap": "ellipsis" as const,
+          width: "data(width)" as unknown as number,
+          height: "data(height)" as unknown as number,
           shape: "round-rectangle" as const,
         },
       },
-      // Tier-colored frames around card nodes.
+      // Tier-colored frames + label emphasis. Gold > silver > bronze.
       {
         selector: "node[tier = 'gold']",
-        style: { "border-color": "#d4af37", "border-width": 3 },
+        style: {
+          "border-color": "#d4af37",
+          "border-width": 3,
+          color: "#fde68a",
+          "font-size": 13,
+          "font-weight": 600,
+          "text-margin-y": 8,
+        },
       },
       {
         selector: "node[tier = 'silver']",
-        style: { "border-color": "#c0c0c0", "border-width": 2 },
+        style: {
+          "border-color": "#c0c0c0",
+          "border-width": 2,
+          color: "#e7e5e4",
+          "font-size": 11,
+          "text-margin-y": 7,
+        },
       },
       {
         selector: "node[tier = 'bronze']",
-        style: { "border-color": "#cd7f32", "border-width": 2 },
+        style: {
+          "border-color": "#cd7f32",
+          "border-width": 2,
+          color: "#d6a373",
+          "font-size": 10,
+          "text-margin-y": 6,
+        },
       },
       // Card-card edges: light teal with thickness keyed off edgeTier.
       {
@@ -389,20 +451,26 @@ export function SynergyMap({ entries, top }: Props) {
           stylesheet={stylesheet}
           layout={
             {
-              name: "cose",
+              name: "cose-bilkent",
               animate: false,
-              padding: 40,
-              // Force-directed tuning: pull edges into clusters but keep
-              // nodes well-separated so card images stay readable at base
-              // sizes. Adjust gravity if 99-card decks feel cramped.
-              nodeRepulsion: 8000,
-              idealEdgeLength: 80,
-              edgeElasticity: 0.45,
-              gravity: 0.25,
-              numIter: 600,
+              padding: 60,
+              // Tuned for a 99-card commander deck. Bigger node sizes
+              // (gold cards reach 132x99 px) need proportionally more
+              // repulsion to keep tier clusters readable. nodeDimensions-
+              // IncludeLabels accounts for the name labels in spacing so
+              // gold labels never sit underneath an adjacent card.
+              nodeRepulsion: 12000,
+              idealEdgeLength: 180,
+              edgeElasticity: 0.3,
+              nestingFactor: 0.1,
+              gravity: 0.35,
+              gravityRangeCompound: 1.5,
+              numIter: 3000,
+              tile: true,
+              nodeDimensionsIncludeLabels: true,
             } as unknown as cytoscape.LayoutOptions
           }
-          minZoom={0.25}
+          minZoom={0.2}
           maxZoom={3}
           cy={bindCy}
         />
