@@ -7,24 +7,22 @@
  *
  *   pnpm reextract-keywords
  *
- * What it does NOT have access to (since we don't store the raw
- * Scryfall payload): the printed `keywords[]` array and `produced_mana`
- * array. Those parts of the keyword set are preserved from the existing
- * row's `keywordsJson` — anything that LOOKS like a printed keyword
- * (lower-kebab of a known mechanic) or a produces-* tag is carried
- * forward; the regex-pack and type-line tokens are recomputed.
+ * `producedManaJson` is persisted on the Card row, so mana-fixing /
+ * mana-rock / produces-* are recomputed accurately. The raw Scryfall
+ * `keywords[]` array (Flying, Vigilance, Haste, …) isn't stored, so
+ * those tags are carried forward from the existing keywordsJson.
  *
- * For a full clean rebuild (refresh printed keywords + produced_mana
- * too), use `ingest --force` instead — that fetches the fresh Scryfall
- * data.
+ * For a full clean rebuild (refresh printed keywords from Scryfall too),
+ * use `ingest --force` instead.
  */
 import { prisma } from "../src/lib/db";
 import { extractKeywords } from "../src/lib/synergy/keywords";
 
-// Heuristic for "looks like a printed keyword or produces-* tag":
-// short lowercase token, no spaces, present in the existing keyword
-// set but not derived from oracle text by the regex pack.
-const PRESERVED_PREFIXES = ["otag:", "produces-"];
+// Prefixed tags we never re-derive — they come from data sources
+// extractKeywords doesn't have access to during reextract:
+//   - otag:* — Scryfall oracle tags (loaded by `ingest:tags`)
+//   - everything else is recomputable.
+const PRESERVED_PREFIXES = ["otag:"];
 
 async function main() {
   const all = await prisma.card.findMany({
@@ -34,6 +32,7 @@ async function main() {
       oracleText: true,
       keywordsJson: true,
       oracleTagsJson: true,
+      producedManaJson: true,
     },
   });
   console.log(`Re-extracting keywords for ${all.length} cards...`);
@@ -42,42 +41,22 @@ async function main() {
   for (const c of all) {
     const existing = JSON.parse(c.keywordsJson) as string[];
     const oracleTags = JSON.parse(c.oracleTagsJson) as string[];
-    // Carry forward fields we can't recompute from the DB row.
+    const producedMana = JSON.parse(c.producedManaJson) as string[];
+    // Carry forward printed-keyword tags (we don't store the raw
+    // Scryfall keywords[] array, so they have to come from existing rows).
     const carried = existing.filter((k) =>
       PRESERVED_PREFIXES.some((p) => k.startsWith(p)),
     );
-    // Re-derive everything we CAN compute from oracle_text + type_line.
-    // Printed `keywords[]` from Scryfall is unavailable here; if it's
-    // missing, run `ingest --force` to refresh from the bulk.
     const recomputed = extractKeywords(
       {
         keywords: [],
         type_line: c.typeLine,
         oracle_text: c.oracleText ?? "",
-        produced_mana: [],
+        produced_mana: producedMana,
       },
       oracleTags,
     );
-    const mergedSet = new Set([...recomputed, ...carried]);
-
-    // Synthesize "mana-fixing" from carried produces-* tags. The
-    // extractKeywords() call above can't compute this during reextract
-    // because produced_mana isn't stored on the Card row — but the
-    // carried-forward produces-r / produces-g / ... tags are equivalent
-    // evidence. Apply the same rule as the ingest path: 2+ colors on
-    // a Land or Artifact.
-    if (
-      /\bland\b/i.test(c.typeLine) ||
-      /\bartifact\b/i.test(c.typeLine)
-    ) {
-      let producesCount = 0;
-      for (const k of mergedSet) {
-        if (k.startsWith("produces-")) producesCount += 1;
-      }
-      if (producesCount >= 2) mergedSet.add("mana-fixing");
-    }
-
-    const merged = Array.from(mergedSet).sort();
+    const merged = Array.from(new Set([...recomputed, ...carried])).sort();
     const oldSorted = [...existing].sort();
     if (
       merged.length === oldSorted.length &&

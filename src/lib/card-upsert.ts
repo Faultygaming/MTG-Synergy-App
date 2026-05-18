@@ -61,6 +61,7 @@ export async function upsertScryfallCard(sc: ScryfallCard): Promise<UpsertResult
     power: sc.power ?? null,
     toughness: sc.toughness ?? null,
     keywordsJson: JSON.stringify(keywords),
+    producedManaJson: JSON.stringify(sc.produced_mana ?? []),
     imageSmall: summary.imageSmall ?? null,
     imageNormal: summary.imageNormal ?? null,
     scryfallUri: summary.scryfallUri ?? null,

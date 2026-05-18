@@ -91,6 +91,7 @@ async function main(): Promise<void> {
       oracleText: true,
       keywordsJson: true,
       oracleTagsJson: true,
+      producedManaJson: true,
     },
   });
 
@@ -108,12 +109,13 @@ async function main(): Promise<void> {
 
   for (const c of cards) {
     const oracleTags = JSON.parse(c.oracleTagsJson) as string[];
+    const producedMana = JSON.parse(c.producedManaJson) as string[];
     const extracted = extractKeywords(
       {
         keywords: [],
         type_line: c.typeLine,
         oracle_text: c.oracleText ?? "",
-        produced_mana: [],
+        produced_mana: producedMana,
       },
       oracleTags,
     );
