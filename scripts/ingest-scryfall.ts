@@ -13,13 +13,42 @@
  * Usage: pnpm ingest [--force]
  */
 import { createWriteStream } from "node:fs";
-import { mkdir, readFile, stat } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import { prisma } from "../src/lib/db";
 import { upsertScryfallCard } from "../src/lib/card-upsert";
 import type { ScryfallCard } from "../src/lib/scryfall";
+
+// State file tracks the version of the last successfully-ingested bulk
+// source. On subsequent runs we compare Scryfall's `updated_at` (or the
+// file's mtime in --file mode) to the recorded value and skip the full
+// ingest if nothing changed. Overridable via INGEST_STATE_FILE for tests.
+const STATE_PATH =
+  process.env.INGEST_STATE_FILE ??
+  resolve(process.cwd(), "data/.ingest-state.json");
+
+interface IngestState {
+  version: 1;
+  lastIngestedAt: string;     // Scryfall updated_at, or file mtime ISO
+  lastIngestedSource: string; // "scryfall:bulk" or "file:<path>"
+  lastIngestedCount: number;
+  lastRunAt: string;
+}
+
+async function loadState(): Promise<IngestState | null> {
+  try {
+    return JSON.parse(await readFile(STATE_PATH, "utf8")) as IngestState;
+  } catch {
+    return null;
+  }
+}
+
+async function writeIngestState(s: IngestState): Promise<void> {
+  await mkdir(dirname(STATE_PATH), { recursive: true });
+  await writeFile(STATE_PATH, JSON.stringify(s, null, 2) + "\n");
+}
 const FORCE = process.argv.includes("--force");
 // Optional override: `--file <path>` ingests from a local JSON file
 // instead of fetching the Scryfall bulk archive. Used by the validation
@@ -69,15 +98,40 @@ async function downloadIfMissing(url: string, dest: string) {
 
 async function main() {
   let dest: string;
+  let sourceVersion: string;
+  let sourceLabel: string;
   if (FILE_OVERRIDE) {
     dest = resolve(FILE_OVERRIDE);
     console.log(`Reading from override file ${dest} (skipping Scryfall download)`);
+    const st = await stat(dest);
+    sourceVersion = new Date(st.mtimeMs).toISOString();
+    sourceLabel = `file:${dest}`;
   } else {
     const dir = resolve(process.cwd(), "data/scryfall-bulk");
     await mkdir(dir, { recursive: true });
     dest = resolve(dir, "oracle-cards.json");
     const entry = await findOracleBulk();
+    sourceVersion = entry.updated_at;
+    sourceLabel = "scryfall:bulk";
     await downloadIfMissing(entry.download_uri, dest);
+  }
+
+  // Skip the full ingest if our recorded state matches the bulk
+  // source's version — saves the 37k-card upsert loop when nothing's
+  // changed since the last run. `--force` bypasses the check.
+  if (!FORCE) {
+    const state = await loadState();
+    if (
+      state &&
+      state.lastIngestedSource === sourceLabel &&
+      state.lastIngestedAt === sourceVersion
+    ) {
+      console.log(
+        `Already up to date — ${sourceLabel} version ${sourceVersion} was ingested ${state.lastIngestedCount} cards on ${state.lastRunAt}.`,
+      );
+      console.log("Pass --force to re-ingest anyway.");
+      return;
+    }
   }
 
   console.log("Parsing JSON (this may take a moment)...");
@@ -102,6 +156,14 @@ async function main() {
   console.log(
     `Ingest complete. ${created} created, ${updated} refreshed, ${merged} merged into existing rows.`,
   );
+  await writeIngestState({
+    version: 1,
+    lastIngestedAt: sourceVersion,
+    lastIngestedSource: sourceLabel,
+    lastIngestedCount: created + updated + merged,
+    lastRunAt: new Date().toISOString(),
+  });
+  console.log(`State saved to ${STATE_PATH}.`);
 }
 
 main()

@@ -23,7 +23,14 @@ import { join } from "node:path";
 
 const tmpDir = mkdtempSync(join(tmpdir(), "mtg-validate-scripts-"));
 const dbPath = join(tmpDir, "test.db");
-const env = { ...process.env, DATABASE_URL: `file:${dbPath}` };
+const env = {
+  ...process.env,
+  DATABASE_URL: `file:${dbPath}`,
+  // Scope ingest-scryfall's state file to the temp dir too, so the
+  // skip-when-unchanged logic can be exercised without colliding with
+  // the dev box's real ingest state.
+  INGEST_STATE_FILE: join(tmpDir, "ingest-state.json"),
+};
 const TSX = "./node_modules/tsx/dist/cli.mjs";
 
 let failures = 0;
@@ -161,10 +168,19 @@ async function run() {
     "--file",
     bulkPath,
   ]);
-  step("ingest again (idempotent, all should be 'refreshed')", [
+  // Second run: state file recorded the bulk's mtime, so the script
+  // should detect 'already up to date' and exit without re-processing.
+  step("ingest again (must short-circuit via ingest-state)", [
     "scripts/ingest-scryfall.ts",
     "--file",
     bulkPath,
+  ]);
+  // --force overrides the state check, re-processes the full set.
+  step("ingest --force (must bypass state and re-process)", [
+    "scripts/ingest-scryfall.ts",
+    "--file",
+    bulkPath,
+    "--force",
   ]);
 
   console.log("\ningest-oracle-tags.ts (offline, file-based)");
