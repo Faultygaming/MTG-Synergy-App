@@ -43,6 +43,30 @@ describe("subtypesFromTypeLine", () => {
     expect(subtypesFromTypeLine("Legendary Planeswalker — Jeska")).toEqual([]);
     expect(subtypesFromTypeLine("Planeswalker — Dakkon")).toEqual([]);
   });
+
+  // DFC / MDFC: "front // back" type_lines must be processed per face,
+  // otherwise the planeswalker back leaks its character name through
+  // the creature front. Arlinn Kord, Garruk Relentless, Huatli, etc.
+  it("processes DFC type_lines per face (planeswalker back doesn't leak)", () => {
+    expect(
+      subtypesFromTypeLine(
+        "Legendary Creature — Human Werewolf // Legendary Planeswalker — Arlinn",
+      ),
+    ).toEqual(expect.arrayContaining(["human", "werewolf"]));
+    expect(
+      subtypesFromTypeLine(
+        "Legendary Creature — Human Werewolf // Legendary Planeswalker — Arlinn",
+      ),
+    ).not.toContain("arlinn");
+  });
+
+  it("processes DFC type_lines where one face is a named-subtype owner", () => {
+    // Plane front, Creature back (hypothetical) — subtypes survive
+    // from the creature face only.
+    expect(
+      subtypesFromTypeLine("Plane — Zhalfir // Creature — Soldier"),
+    ).toEqual(["soldier"]);
+  });
 });
 
 describe("extractKeywords", () => {
@@ -324,6 +348,50 @@ describe("extractKeywords", () => {
     });
     expect(kws).not.toContain("mana-fixing");
     expect(kws).not.toContain("mana-rock");
+  });
+
+  // Artifact mana fixers should ALSO get mana-fixing (in addition to
+  // mana-rock). Otherwise Arcane Signet / Chromatic Lantern / Coalition
+  // Relic look indistinguishable from Sol Ring in the synergy index.
+  it("tags Arcane Signet (multi-color artifact) with mana-fixing + mana-rock", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Artifact",
+      oracle_text:
+        "{T}: Add one mana of any color in your commander's color identity.",
+      produced_mana: ["W", "U", "B", "R", "G"],
+    });
+    expect(kws).toContain("mana-rock");
+    expect(kws).toContain("mana-fixing");
+  });
+
+  it("does NOT tag Sol Ring (colorless-only) with mana-fixing", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Artifact",
+      oracle_text: "{T}: Add {C}{C}.",
+      produced_mana: ["C"],
+    });
+    expect(kws).toContain("mana-rock");
+    expect(kws).not.toContain("mana-fixing");
+  });
+
+  // DFC creature // planeswalker — both faces' supertype tokens should
+  // surface (creature + planeswalker), but the planeswalker character
+  // name on the back is stripped via subtypesFromTypeLine.
+  it("DFC creature // planeswalker adds both type tokens, no character name", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line:
+        "Legendary Creature — Human Werewolf // Legendary Planeswalker — Arlinn",
+      oracle_text: "Daybound",
+      produced_mana: [],
+    });
+    expect(kws).toContain("creature");
+    expect(kws).toContain("planeswalker");
+    expect(kws).toContain("human");
+    expect(kws).toContain("werewolf");
+    expect(kws).not.toContain("arlinn");
   });
 
   it("tags Exploration with extra-land-drops", () => {
