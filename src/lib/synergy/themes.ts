@@ -282,6 +282,12 @@ export interface CandidateThemeMatch {
 // Min cards in a theme before we consider it a "primary theme" of the
 // deck. 5 catches genuine archetypes without polluting on coincidence.
 const THEME_PRIMARY_THRESHOLD = 5;
+// A theme also has to have BOTH SIDES present — at least one enabler
+// AND one payoff — otherwise it's just an incidental cluster. A deck
+// with 12 token-makers but zero token payoffs (anthems, populate,
+// doublers) isn't running a tokens strategy — those token-makers are
+// landfall-incidental.
+const REQUIRE_ROLE_BALANCE = true;
 
 /**
  * Walk the deck and return each theme that's a "primary" archetype
@@ -313,7 +319,11 @@ export function detectDeckThemes(entries: DeckEntry[]): ThemeMatch[] {
       if (isNeutral) neutralCount += entry.quantity;
     }
     const totalCount = enablerCount + payoffCount + neutralCount;
-    if (totalCount >= THEME_PRIMARY_THRESHOLD) {
+    const passesThreshold = totalCount >= THEME_PRIMARY_THRESHOLD;
+    const passesRoleBalance =
+      !REQUIRE_ROLE_BALANCE ||
+      (enablerCount >= 1 && payoffCount >= 1);
+    if (passesThreshold && passesRoleBalance) {
       matches.push({
         themeId: theme.id,
         themeLabel: theme.label,
@@ -363,9 +373,14 @@ export function scoreCandidateByThemes(
     let signal: "strong" | "moderate" | "weak";
     let rationale: string;
 
-    // Strong: this card fills the LIGHTER side of an unbalanced theme.
-    // Threshold: heavy side ≥ 5, light side < 3 (deck has the pieces
-    // but is missing the half that closes the loop).
+    // STRONG paths (any of these qualifies):
+    //   (a) closes-the-loop: candidate fills the lighter side of an
+    //       unbalanced theme (≥5 on one side, <3 on the other).
+    //   (b) heavy archetype: theme has 20+ contributing cards AND
+    //       candidate is a payoff. A 60-card "lands matter" theme is
+    //       the defining archetype of the deck — Crucible of Worlds is
+    //       a high-impact addition whether or not the enabler/payoff
+    //       balance is already even.
     if (cardRole === "payoff" && dt.enablerCount >= 5 && dt.payoffCount < 3) {
       signal = "strong";
       rationale = `Your deck has ${dt.enablerCount} ${dt.themeLabel.toLowerCase()} enablers but only ${dt.payoffCount} payoff${dt.payoffCount === 1 ? "" : "s"} — this is the kind of card that closes the loop.`;
@@ -376,6 +391,9 @@ export function scoreCandidateByThemes(
     ) {
       signal = "strong";
       rationale = `Your deck has ${dt.payoffCount} ${dt.themeLabel.toLowerCase()} payoffs but only ${dt.enablerCount} enabler${dt.enablerCount === 1 ? "" : "s"} — this fuels them.`;
+    } else if (cardRole === "payoff" && dt.totalCount >= 20) {
+      signal = "strong";
+      rationale = `Your deck is built around ${dt.themeLabel.toLowerCase()} (${dt.totalCount} cards) — this is a high-impact payoff.`;
     } else if (cardRole === "neutral") {
       signal = "weak";
       rationale = `Touches the ${dt.themeLabel.toLowerCase()} theme.`;

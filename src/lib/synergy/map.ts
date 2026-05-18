@@ -41,6 +41,69 @@ export function classifyCard(
   return { tier, shareCount };
 }
 
+/**
+ * Theme-based map classification, mirrors the sidebar's tier logic.
+ *
+ *   gold   = card has at least one PAYOFF keyword in a primary theme
+ *            AND the theme is heavy (≥20 cards) — high-impact piece.
+ *   silver = card plays PAYOFF role in any primary theme.
+ *   bronze = card plays ENABLER or NEUTRAL role in any primary theme.
+ *   none   = no theme membership.
+ *
+ * `themes` is the deck's primary-theme list (output of
+ * `detectDeckThemes` in synergy/themes.ts), serialized for the map's
+ * pure-function world: each entry carries the theme's member keywords
+ * with role + the theme's totalCount.
+ */
+export interface MapThemeMember {
+  keyword: string;
+  role: "enabler" | "payoff" | "neutral";
+}
+export interface MapTheme {
+  themeId: string;
+  members: MapThemeMember[];
+  totalCount: number;
+}
+
+export function classifyCardByThemes(
+  keywords: readonly string[],
+  themes: readonly MapTheme[],
+): { tier: MapTier; shareCount: number } {
+  const cardKws = new Set(keywords);
+  let bestTier: MapTier = "none";
+  let shareCount = 0;
+  for (const theme of themes) {
+    let role: "enabler" | "payoff" | "neutral" | null = null;
+    for (const m of theme.members) {
+      if (!cardKws.has(m.keyword)) continue;
+      shareCount += 1;
+      if (m.role === "payoff") {
+        role = "payoff";
+        break;
+      }
+      if (m.role === "enabler") role = "enabler";
+      else if (m.role === "neutral" && !role) role = "neutral";
+    }
+    if (!role) continue;
+    // Tier promotion: payoff in heavy theme = gold; payoff elsewhere
+    // = silver; enabler/neutral = bronze. We keep the BEST tier seen
+    // across all themes (gold > silver > bronze).
+    let candidateTier: MapTier;
+    if (role === "payoff" && theme.totalCount >= 20) candidateTier = "gold";
+    else if (role === "payoff") candidateTier = "silver";
+    else candidateTier = "bronze";
+    if (TIER_RANK[candidateTier] < TIER_RANK[bestTier]) bestTier = candidateTier;
+  }
+  return { tier: bestTier, shareCount };
+}
+
+const TIER_RANK: Record<MapTier, number> = {
+  gold: 0,
+  silver: 1,
+  bronze: 2,
+  none: 3,
+};
+
 export function sizeFor(tier: MapTier, shareCount: number): number {
   const band = SIZE_BANDS[tier];
   const t = Math.min(1, shareCount / 3);

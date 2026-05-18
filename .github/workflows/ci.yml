@@ -1,12 +1,21 @@
-# Lightweight CI: typecheck, lint, and tests on every PR. Keeps the
-# release workflow (which builds + pushes images) fast by running
-# correctness checks here instead.
+# Fast PR CI: lint + typecheck + test + build + integration smoke tests.
+# Designed to wall-clock under ~90s on a warm cache.
+#
+# Strategy:
+#   - `concurrency`: cancel any in-flight run when a new push lands on
+#     the same ref. Stops piling up runs when a PR is rebased / amended.
+#   - 3 PARALLEL JOBS instead of one sequential `pnpm validate` pipeline.
+#     Wall clock = max(slowest job), not sum.
+#   - DEPENDENCY CACHE: actions/cache the resolved `node_modules`
+#     (including the generated Prisma client) keyed on lockfile + schema
+#     hash. Cache hit skips `pnpm install` entirely (~30s → ~5s per job).
+#   - NEXT BUILD CACHE: cache `.next/cache` for incremental Next builds.
+#   - AGGREGATOR JOB: `check` (final job) reports pass/fail across the
+#     parallel jobs as a SINGLE status. Keeps branch-protection rules
+#     pointing at one check name despite the job split.
 #
 # Only runs on PRs. Re-running on main after merge is redundant — the
-# code that gets merged was already CI'd on the PR branch (squash merge
-# preserves the same diff), so the post-merge run would be the same
-# checks against the same code. release.yml handles main-branch Docker
-# builds. `workflow_dispatch` is kept as a manual safety net.
+# squash-merged code is identical to what CI just passed on the PR.
 
 name: ci
 
@@ -14,27 +23,118 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Reusable steps as a YAML anchor would be cleaner, but GitHub Actions
+# doesn't support YAML anchors in workflow files (it's a known
+# limitation since 2019). We instead duplicate the setup block across
+# the parallel jobs and rely on action caches for speed.
+
 jobs:
-  check:
+  lint-typecheck-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: pnpm/action-setup@v4
         with:
           version: 9.12.3
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
+      - uses: actions/cache@v4
+        id: deps-cache
+        with:
+          path: node_modules
+          key: deps-${{ runner.os }}-node22-${{ hashFiles('pnpm-lock.yaml', 'prisma/schema.prisma') }}
+      - name: Install dependencies (cache miss)
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm prisma generate
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
 
-      - run: pnpm install --frozen-lockfile
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/cache@v4
+        id: deps-cache
+        with:
+          path: node_modules
+          key: deps-${{ runner.os }}-node22-${{ hashFiles('pnpm-lock.yaml', 'prisma/schema.prisma') }}
+      - name: Install dependencies (cache miss)
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm prisma generate
+      # Next.js incremental build cache. Cache misses degrade gracefully
+      # to a cold build (~60s extra), they don't fail. Restore keys
+      # let us partial-match on the previous lock to still get value
+      # when a source file but not a dep changes.
+      - uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: next-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ hashFiles('src/**/*.ts', 'src/**/*.tsx', 'next.config.mjs') }}
+          restore-keys: |
+            next-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-
+            next-${{ runner.os }}-
+      - run: pnpm build
 
-      - run: pnpm prisma generate
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/cache@v4
+        id: deps-cache
+        with:
+          path: node_modules
+          key: deps-${{ runner.os }}-node22-${{ hashFiles('pnpm-lock.yaml', 'prisma/schema.prisma') }}
+      - name: Install dependencies (cache miss)
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm prisma generate
+      # Maintenance-script smoke tests + keyword e2e. Both spin up
+      # throwaway SQLite DBs and run real script logic — catches
+      # regressions the unit tests can't (file-perms, prisma db push
+      # behavior, multi-script interplay).
+      - run: pnpm validate:scripts
+      - run: pnpm validate:keywords
 
-      # `pnpm validate` bundles lint + typecheck + test + build + the
-      # maintenance-script smoke tests (against a temp SQLite DB).
-      # Single source of truth for "is this branch green" — devs run the
-      # same command locally before pushing.
-      - run: pnpm validate
+  # Single status check for branch protection rules. PR status pages
+  # show only `check`; merge gating points at this one job.
+  check:
+    if: always()
+    needs: [lint-typecheck-test, build, integration]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report aggregate status
+        run: |
+          echo "lint-typecheck-test: ${{ needs.lint-typecheck-test.result }}"
+          echo "build:               ${{ needs.build.result }}"
+          echo "integration:         ${{ needs.integration.result }}"
+          if [ "${{ needs.lint-typecheck-test.result }}" != "success" ] \
+             || [ "${{ needs.build.result }}" != "success" ] \
+             || [ "${{ needs.integration.result }}" != "success" ]; then
+            echo "::error::One or more CI jobs failed"
+            exit 1
+          fi

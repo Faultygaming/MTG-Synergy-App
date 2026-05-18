@@ -391,6 +391,41 @@ describe("extractKeywords", () => {
     expect(kws).not.toContain("mana-fixing");
   });
 
+  // Crucible of Fire is a TRIBAL anthem ("Dragon creatures you control
+  // get +1/+1") — not a generic anthem. The old anthem regex matched
+  // it and falsely promoted Crucible of Fire to gold tier for the
+  // tokens theme in a deck with many token-makers. Anchored regex
+  // only matches generic / "All "/"Other " / sentence-start forms.
+  it("does NOT tag Crucible of Fire (tribal anthem) as plain anthem", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Enchantment",
+      oracle_text: "Dragon creatures you control get +1/+1.",
+      produced_mana: [],
+    });
+    expect(kws).not.toContain("anthem");
+  });
+
+  it("tags generic anthems (Glorious Anthem)", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Enchantment",
+      oracle_text: "Creatures you control get +1/+1.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("anthem");
+  });
+
+  it("tags 'All creatures you control' anthems", () => {
+    const kws = extractKeywords({
+      keywords: [],
+      type_line: "Enchantment",
+      oracle_text: "Some flavor text. All creatures you control get +1/+1.",
+      produced_mana: [],
+    });
+    expect(kws).toContain("anthem");
+  });
+
   // Fetch lands and land-ramp spells used to get tagged ramp + tutor.
   // The double-tag inflated the deck's tutor count enough to crowd
   // real archetypes out of bronze tier in lands-matter decks.
