@@ -29,8 +29,8 @@ jobs:
 
       - run: pnpm prisma generate
 
-      - run: pnpm typecheck
-
-      - run: pnpm lint
-
-      - run: pnpm test
+      # `pnpm validate` bundles lint + typecheck + test + build + the
+      # maintenance-script smoke tests (against a temp SQLite DB).
+      # Single source of truth for "is this branch green" — devs run the
+      # same command locally before pushing.
+      - run: pnpm validate
