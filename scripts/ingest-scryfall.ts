@@ -17,11 +17,9 @@ import { mkdir, readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "../src/lib/db";
 import { extractKeywords } from "../src/lib/synergy/keywords";
 import type { ScryfallCard } from "../src/lib/scryfall";
-
-const prisma = new PrismaClient();
 const FORCE = process.argv.includes("--force");
 
 interface BulkEntry {

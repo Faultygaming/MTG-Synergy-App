@@ -6,11 +6,9 @@
  */
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "../src/lib/db";
 import { extractKeywords } from "../src/lib/synergy/keywords";
 import type { ScryfallCard } from "../src/lib/scryfall";
-
-const prisma = new PrismaClient();
 
 async function main() {
   const path = resolve(process.cwd(), "data/fixtures.json");

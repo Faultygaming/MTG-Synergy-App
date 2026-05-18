@@ -18,7 +18,8 @@
     "db:studio": "prisma studio",
     "seed": "tsx scripts/seed-fixtures.ts",
     "ingest": "tsx scripts/ingest-scryfall.ts",
-    "ingest:tags": "tsx scripts/ingest-oracle-tags.ts"
+    "ingest:tags": "tsx scripts/ingest-oracle-tags.ts",
+    "preview:map": "tsx scripts/preview-map.ts"
   },
   "engines": {
     "node": ">=20",

@@ -11,11 +11,9 @@
  */
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "../src/lib/db";
 import { getCardByName, toCardSummary, sleep } from "../src/lib/scryfall";
 import { extractKeywords } from "../src/lib/synergy/keywords";
-
-const prisma = new PrismaClient();
 
 async function main() {
   const path = resolve(process.cwd(), "data/world-shaper-upgrade-pool.json");

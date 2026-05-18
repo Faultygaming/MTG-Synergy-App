@@ -23,10 +23,8 @@
  */
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "../src/lib/db";
 import { searchCards, sleep, type ScryfallCard } from "../src/lib/scryfall";
-
-const prisma = new PrismaClient();
 
 async function loadTagList(): Promise<string[]> {
   const path = resolve(process.cwd(), "data/oracle-tags.json");

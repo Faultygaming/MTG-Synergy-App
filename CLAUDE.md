@@ -224,6 +224,24 @@ those cards (filtered by commander legality, ranked by synergy).
 - **`Deck`** + **`DeckCard`** — straightforward deck contents with quantity.
   Deck.format is freeform for v1; format-aware filtering is roadmap.
 
+### Self-validating SynergyMap changes
+
+`scripts/preview-map.ts` (npm script: `pnpm preview:map <deck-id>`) runs
+the same cose-bilkent layout headlessly and writes `data/map-preview.svg`,
+which mirrors what the browser will show. Use this loop when iterating
+on visual code in `src/components/SynergyMap.tsx`:
+
+```bash
+pnpm seed                            # ensure fixtures are in the DB
+pnpm tsx scripts/seed-preview-deck.ts  # produces a deck id
+pnpm preview:map <deck-id>           # writes data/map-preview.svg
+```
+
+The math (sizing, tier classification, edge derivation) lives in
+`src/lib/synergy/map.ts` so the React component and the preview script
+stay in sync — change one, change both. If they diverge, the preview is
+lying.
+
 ### UI
 
 - **App Router** (Next.js 14). Server components do the data loading, client

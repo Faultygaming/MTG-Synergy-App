@@ -9,6 +9,14 @@ import type {
   StylesheetStyle,
 } from "cytoscape";
 import type { DeckEntry } from "@/lib/types";
+import {
+  classifyCard,
+  edgeTier as edgeTierFn,
+  sizeFor as sizeForFn,
+  ART_ASPECT,
+  type MapTier,
+  type MapTop,
+} from "@/lib/synergy/map";
 
 // react-cytoscapejs must be client-only (touches `window`). We also
 // register the cose-bilkent layout extension here so it's available
@@ -38,91 +46,31 @@ function artCropFor(url: string | null | undefined): string {
   return url.replace("/normal/", "/art_crop/").replace("/small/", "/art_crop/");
 }
 
-// Card art is roughly 4:3 landscape in art_crop. Forcing width/height
-// from a single size value would crop the art; use this ratio to derive
-// height from width.
-const ART_ASPECT = 4 / 3;
-
-interface Top {
-  primary?: string;
-  secondary?: string;
-  tertiary?: string;
-}
+// ART_ASPECT, MapTier, MapTop are re-exported from @/lib/synergy/map so
+// the offline preview script stays in sync.
 
 interface Props {
   entries: DeckEntry[];
   top: Top;
 }
 
-// Card sizing is band-based so the tier-dominance rule from the synergy
-// ranker holds visually: a gold card with any shareCount is always bigger
-// than a silver card with any shareCount. Within a band, share count
-// (number of deck top-3 keywords this card carries) picks the size.
-// Values are node WIDTHS in pixels; height is width / ART_ASPECT.
-const SIZE_BANDS = {
-  gold:   { min: 88, max: 132 },
-  silver: { min: 60, max: 80 },
-  bronze: { min: 42, max: 56 },
-  none:   { min: 28, max: 36 },
-} as const;
-
-type CardTier = keyof typeof SIZE_BANDS;
-
-function sizeFor(tier: CardTier, shareCount: number): number {
-  const band = SIZE_BANDS[tier];
-  const t = Math.min(1, shareCount / 3); // saturate at 3 top-3 matches
-  return Math.round(band.min + (band.max - band.min) * t);
-}
-
-// For each card in the deck, classify by which of the deck's top-3
-// keywords it carries. Card "tier" is the highest top-3 keyword it has;
-// shareCount is how many of the top-3 it has (0..3).
-function classifyDeckCard(
-  keywords: readonly string[],
-  top: Top,
-): { tier: CardTier; shareCount: number } {
-  const hasP = !!top.primary && keywords.includes(top.primary);
-  const hasS = !!top.secondary && keywords.includes(top.secondary);
-  const hasT = !!top.tertiary && keywords.includes(top.tertiary);
-  const shareCount = (hasP ? 1 : 0) + (hasS ? 1 : 0) + (hasT ? 1 : 0);
-  const tier: CardTier = hasP ? "gold" : hasS ? "silver" : hasT ? "bronze" : "none";
-  return { tier, shareCount };
-}
-
-// Edge tier between two deck cards = the highest-priority keyword they
-// BOTH share (1 = both share primary, 2 = secondary, 3 = tertiary,
-// 4 = any other shared keyword). Returns 0 if they share nothing.
-function edgeTier(
-  aKws: readonly string[],
-  bKwsSet: Set<string>,
-  top: Top,
-): 0 | 1 | 2 | 3 | 4 {
-  let best: 0 | 1 | 2 | 3 | 4 = 0;
-  for (const k of aKws) {
-    if (!bKwsSet.has(k)) continue;
-    if (k === top.primary) return 1; // can't beat primary; bail early
-    if (k === top.secondary) {
-      if (best > 2 || best === 0) best = 2;
-    } else if (k === top.tertiary) {
-      if (best > 3 || best === 0) best = 3;
-    } else if (best === 0) {
-      best = 4;
-    }
-  }
-  return best;
-}
+// Sizing + tier classification + edge derivation moved to
+// src/lib/synergy/map.ts so the same code runs both client-side (here)
+// and headless-side (scripts/preview-map.ts) for visual regression checks.
+type CardTier = MapTier;
+type Top = MapTop;
 
 const EDGE_TIER_WIDTH: Record<1 | 2 | 3 | 4, number> = {
-  1: 3.2,
-  2: 2.2,
-  3: 1.4,
-  4: 0.6,
+  1: 3.0,
+  2: 2.0,
+  3: 1.2,
+  4: 0.4,
 };
 const EDGE_TIER_OPACITY: Record<1 | 2 | 3 | 4, number> = {
-  1: 0.8,
-  2: 0.55,
-  3: 0.4,
-  4: 0.18,
+  1: 0.7,
+  2: 0.45,
+  3: 0.3,
+  4: 0.08,
 };
 
 export function SynergyMap({ entries, top }: Props) {
@@ -130,9 +78,11 @@ export function SynergyMap({ entries, top }: Props) {
   // Default view is card-only; flip to add keyword nodes back in.
   const [showKeywords, setShowKeywords] = useState(false);
   // Quaternary edges (cards that share a keyword that ISN'T in the deck's
-  // top-3) are very numerous on a 99-card deck — off by default to avoid
-  // a hairball. Toggle on for a denser look.
-  const [showQuaternary, setShowQuaternary] = useState(false);
+  // top-3) are how we keep otherwise-isolated cards inside the cluster.
+  // Without them, the cose layout shoves disconnected components far
+  // apart and the viewport ends up mostly black. We default ON now and
+  // style them very subtly so they don't visually dominate.
+  const [showQuaternary, setShowQuaternary] = useState(true);
 
   // Hover-magnify state ---------------------------------------------------
   const [shiftDown, setShiftDown] = useState(false);
@@ -176,10 +126,10 @@ export function SynergyMap({ entries, top }: Props) {
     // Card nodes, sized by tier band + share count.
     const classified = entries.map((e) => ({
       entry: e,
-      ...classifyDeckCard(e.card.keywords, top),
+      ...classifyCard(e.card.keywords, top),
     }));
     for (const c of classified) {
-      const width = sizeFor(c.tier, c.shareCount);
+      const width = sizeForFn(c.tier, c.shareCount);
       const height = Math.round(width / ART_ASPECT);
       const img =
         artCropFor(c.entry.card.imageNormal) ||
@@ -203,7 +153,7 @@ export function SynergyMap({ entries, top }: Props) {
       const aSet = new Set(a.keywords);
       for (let j = i + 1; j < entries.length; j++) {
         const b = entries[j].card;
-        const t = edgeTier(b.keywords, aSet, top);
+        const t = edgeTierFn(b.keywords, aSet, top);
         if (t === 0) continue;
         if (t === 4 && !showQuaternary) continue;
         els.push({
@@ -406,6 +356,11 @@ export function SynergyMap({ entries, top }: Props) {
     cy.off("mouseover").on("mouseover", "node", onOver);
     cy.off("mouseout").on("mouseout", "node", onOut);
     cy.off("tap").on("tap", () => setHover(null));
+    // Fit-to-viewport once the initial layout settles. Without this the
+    // user lands on whatever pan/zoom cytoscape chose by default, which
+    // for force-directed layouts is often "way off to the side" or
+    // "zoomed in to a corner". 40px padding leaves breathing room.
+    cy.off("layoutstop").on("layoutstop", () => cy.fit(undefined, 40));
   }
 
   const hovered = hover ? cardIndex.get(hover.id) : null;
@@ -415,6 +370,13 @@ export function SynergyMap({ entries, top }: Props) {
     <div className="relative h-full w-full">
       {/* Controls strip --------------------------------------------------- */}
       <div className="absolute right-3 top-3 z-10 flex gap-2 text-[11px]">
+        <button
+          onClick={() => cyRef.current?.fit(undefined, 40)}
+          className="rounded border border-ink-line bg-ink/60 px-2 py-1 text-stone-300 backdrop-blur-sm hover:text-stone-100"
+          title="Re-center the layout to fit the viewport"
+        >
+          Fit
+        </button>
         <button
           onClick={() => setShowKeywords((v) => !v)}
           className={
@@ -453,20 +415,26 @@ export function SynergyMap({ entries, top }: Props) {
             {
               name: "cose-bilkent",
               animate: false,
-              padding: 60,
-              // Tuned for a 99-card commander deck. Bigger node sizes
-              // (gold cards reach 132x99 px) need proportionally more
-              // repulsion to keep tier clusters readable. nodeDimensions-
-              // IncludeLabels accounts for the name labels in spacing so
-              // gold labels never sit underneath an adjacent card.
-              nodeRepulsion: 12000,
-              idealEdgeLength: 180,
-              edgeElasticity: 0.3,
+              padding: 40,
+              // Tuned for a 99-card commander deck. Lower nodeRepulsion
+              // + higher gravity than the previous pass — we'd rather a
+              // tight, packed cloud than a sprawling one that needs to
+              // be pan-zoomed. cy.fit() in bindCy then centers on the
+              // result so the user sees everything on first load.
+              nodeRepulsion: 6000,
+              idealEdgeLength: 120,
+              edgeElasticity: 0.45,
               nestingFactor: 0.1,
-              gravity: 0.35,
+              gravity: 0.8,
+              gravityRange: 2.5,
               gravityRangeCompound: 1.5,
               numIter: 3000,
+              // tile=true packs disconnected components (cards with no
+              // shared keywords) into the empty regions of the main
+              // layout instead of shoving them off into the corners.
               tile: true,
+              tilingPaddingVertical: 12,
+              tilingPaddingHorizontal: 12,
               nodeDimensionsIncludeLabels: true,
             } as unknown as cytoscape.LayoutOptions
           }
