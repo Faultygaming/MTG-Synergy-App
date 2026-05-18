@@ -3,6 +3,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import type { CardSummary, DeckEntry, SynergySuggestion } from "@/lib/types";
 import { rankCandidates, topThreeKeywords } from "@/lib/synergy/score";
+import { COMMON_KEYWORD_STOPLIST } from "@/lib/synergy/stoplist";
 import { DeckSidebar } from "@/components/DeckSidebar";
 import { SynergyMap } from "@/components/SynergyMap";
 import {
@@ -81,7 +82,12 @@ export default async function DeckPage({
     : [];
   const commanders: CommanderLegalityCard[] = commanderRows.map(rowToLegality);
 
-  const top = topThreeKeywords(entries);
+  // Apply the common-keyword stoplist so the header reflects actual
+  // synergy themes ("landfall", "ramp", "etb-trigger") instead of
+  // trivia ("creature", "land"). The SynergyMap re-derives the same
+  // top-3 client-side with the same stoplist by default; a toggle lets
+  // the user bring common words back if they want.
+  const top = topThreeKeywords(entries, COMMON_KEYWORD_STOPLIST);
   const violations = JSON.parse(deck.violationsJson) as Violation[];
   const blockers = violations.filter((v) => v.severity === "block");
   const warnings = violations.filter((v) => v.severity === "warn");
@@ -112,7 +118,11 @@ export default async function DeckPage({
     }
     candidates.push(rowToSummary(row));
   }
-  const suggestions: SynergySuggestion[] = rankCandidates(candidates, entries).slice(0, 60);
+  const suggestions: SynergySuggestion[] = rankCandidates(
+    candidates,
+    entries,
+    COMMON_KEYWORD_STOPLIST,
+  ).slice(0, 60);
 
   return (
     <main className="grid min-h-screen grid-cols-[1fr_380px]">
@@ -195,7 +205,7 @@ export default async function DeckPage({
           </details>
         </header>
         <div className="relative min-h-0 flex-1">
-          <SynergyMap entries={entries} top={top} />
+          <SynergyMap entries={entries} />
         </div>
       </section>
       <aside className="border-l border-ink-line bg-ink-soft">

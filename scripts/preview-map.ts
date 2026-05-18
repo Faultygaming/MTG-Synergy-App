@@ -27,6 +27,7 @@ import {
   keywordFrequency,
   topThreeKeywords,
 } from "../src/lib/synergy/score";
+import { COMMON_KEYWORD_STOPLIST } from "../src/lib/synergy/stoplist";
 import type { DeckEntry } from "../src/lib/types";
 
 const TIER_BORDER: Record<MapTier, string> = {
@@ -80,8 +81,10 @@ async function main() {
     },
     quantity: dc.quantity,
   }));
-  const top = topThreeKeywords(entries);
-  const freq = keywordFrequency(entries).slice(0, 5);
+  // Apply the same stoplist the browser applies by default, so the
+  // SVG mirrors what the user actually sees.
+  const top = topThreeKeywords(entries, COMMON_KEYWORD_STOPLIST);
+  const freq = keywordFrequency(entries, COMMON_KEYWORD_STOPLIST).slice(0, 5);
   console.log(
     `Top keywords:`,
     freq.map((f) => `${f.keyword}(${f.count})`).join(" "),
@@ -94,7 +97,11 @@ async function main() {
       keywords: e.card.keywords,
     })),
     top,
-    { includeTier4: true },
+    {
+      includeTier4: true,
+      excludeKeywords: COMMON_KEYWORD_STOPLIST,
+      minClusterSize: 3,
+    },
   );
 
   // Same packing algorithm as the React component — pure-math, no

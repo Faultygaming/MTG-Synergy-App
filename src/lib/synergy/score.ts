@@ -21,12 +21,16 @@ import type {
   Tier,
 } from "../types";
 
-export function keywordFrequency(deck: DeckEntry[]): KeywordFrequency[] {
+export function keywordFrequency(
+  deck: DeckEntry[],
+  excludeKeywords?: ReadonlySet<string>,
+): KeywordFrequency[] {
   const counts = new Map<string, number>();
   for (const entry of deck) {
     // Each unique keyword on a card counts once per copy of that card. For
     // most decks quantity is 1, but commander/limited can have basics x10+.
     for (const k of entry.card.keywords) {
+      if (excludeKeywords?.has(k)) continue;
       counts.set(k, (counts.get(k) ?? 0) + entry.quantity);
     }
   }
@@ -42,21 +46,34 @@ export function keywordFrequency(deck: DeckEntry[]): KeywordFrequency[] {
 // in the deck. Called once per rankCandidates() invocation and reused for
 // every candidate, instead of rebuilt per-call (5x speedup at 2000
 // candidates — see src/lib/synergy/score.bench.ts).
-function deckKeywordSet(deck: DeckEntry[]): Set<string> {
+function deckKeywordSet(
+  deck: DeckEntry[],
+  excludeKeywords?: ReadonlySet<string>,
+): Set<string> {
   const s = new Set<string>();
-  for (const e of deck) for (const k of e.card.keywords) s.add(k);
+  for (const e of deck) {
+    for (const k of e.card.keywords) {
+      if (excludeKeywords?.has(k)) continue;
+      s.add(k);
+    }
+  }
   return s;
 }
 
 // Returns up to three keyword strings: [primary, secondary, tertiary].
 // Slots are filled greedily; if the deck only has two distinct keywords the
-// tertiary slot will be undefined.
-export function topThreeKeywords(deck: DeckEntry[]): {
+// tertiary slot will be undefined. `excludeKeywords` removes stoplisted
+// terms from consideration so the top three reflect actual synergy
+// themes instead of "the deck has creatures and lands".
+export function topThreeKeywords(
+  deck: DeckEntry[],
+  excludeKeywords?: ReadonlySet<string>,
+): {
   primary?: string;
   secondary?: string;
   tertiary?: string;
 } {
-  const freqs = keywordFrequency(deck);
+  const freqs = keywordFrequency(deck, excludeKeywords);
   return {
     primary: freqs[0]?.keyword,
     secondary: freqs[1]?.keyword,
@@ -130,14 +147,20 @@ export function rankSuggestions(suggestions: SynergySuggestion[]): SynergySugges
 // per-candidate path. With 99-card deck × 2000 candidates this drops
 // ~5x of wasted Set inserts; see src/lib/synergy/score.bench.ts for
 // before/after numbers.
+//
+// `excludeKeywords` (typically the stoplist) is applied in BOTH the
+// top-3 selection AND the deck-keyword Set, so a candidate matching
+// only stoplisted terms scores 0 instead of getting tiered for
+// matching "creature".
 export function rankCandidates(
   candidates: CardSummary[],
   deck: DeckEntry[],
+  excludeKeywords?: ReadonlySet<string>,
 ): SynergySuggestion[] {
   // Exclude cards already in the deck.
   const inDeck = new Set(deck.map((e) => e.card.id));
-  const top = topThreeKeywords(deck);
-  const deckKws = deckKeywordSet(deck);
+  const top = topThreeKeywords(deck, excludeKeywords);
+  const deckKws = deckKeywordSet(deck, excludeKeywords);
   const scored: SynergySuggestion[] = [];
   for (const c of candidates) {
     if (inDeck.has(c.id)) continue;

@@ -267,12 +267,41 @@ export function packPieCloud(
 // public name a future caller should use.
 export const packCloud = packPieCloud;
 
+export interface BuildMapOptions {
+  /** Skip tier-4 (any non-top-3 shared keyword) edges entirely. */
+  includeTier4?: boolean;
+  /** Keywords to ignore for edge derivation (stoplist filter). Tier-1/2/3
+   * are unaffected because they come from `top` directly. */
+  excludeKeywords?: ReadonlySet<string>;
+  /** Minimum number of deck cards that must share a keyword before any
+   * edge it contributes is drawn. Default 3 (smallest non-trivial
+   * cluster — see CLAUDE.md / stoplist research notes). Set to 0 to
+   * disable. Only applies to TIER-4 edges; the top-3 keywords backing
+   * gold/silver/bronze tiers always render their edges. */
+  minClusterSize?: number;
+}
+
 export function buildMapElements(
   cards: MapCard[],
   top: MapTop,
-  options: { includeTier4?: boolean } = {},
+  options: BuildMapOptions = {},
 ): { nodes: MapNode[]; edges: MapEdge[] } {
   const includeTier4 = options.includeTier4 ?? true;
+  const excludeKeywords = options.excludeKeywords;
+  const minClusterSize = options.minClusterSize ?? 3;
+
+  // Count how many deck cards carry each keyword, ignoring excluded ones.
+  // Used to suppress tier-4 edges whose underlying keyword is "rare"
+  // (appears on fewer than minClusterSize cards) — that edge represents
+  // an isolated pair, not a theme.
+  const keywordCounts = new Map<string, number>();
+  for (const c of cards) {
+    for (const k of c.keywords) {
+      if (excludeKeywords?.has(k)) continue;
+      keywordCounts.set(k, (keywordCounts.get(k) ?? 0) + 1);
+    }
+  }
+
   const nodes: MapNode[] = cards.map((c) => {
     const { tier, shareCount } = classifyCard(c.keywords, top);
     const width = sizeFor(tier, shareCount);
@@ -285,15 +314,36 @@ export function buildMapElements(
       height: Math.round(width / ART_ASPECT),
     };
   });
+
   const edges: MapEdge[] = [];
   for (let i = 0; i < cards.length; i++) {
     const a = cards[i];
-    const aSet = new Set(a.keywords);
+    // Keyword set without excluded entries, so edgeTier never returns
+    // tier 4 for a stoplisted shared keyword.
+    const aSet = new Set(
+      excludeKeywords ? a.keywords.filter((k) => !excludeKeywords.has(k)) : a.keywords,
+    );
     for (let j = i + 1; j < cards.length; j++) {
       const b = cards[j];
-      const t = edgeTier(b.keywords, aSet, top);
+      const bFiltered = excludeKeywords
+        ? b.keywords.filter((k) => !excludeKeywords.has(k))
+        : b.keywords;
+      const t = edgeTier(bFiltered, aSet, top);
       if (t === 0) continue;
       if (t === 4 && !includeTier4) continue;
+      // Tier-4 only: drop edges whose strongest underlying shared
+      // keyword is "rare". Find the most-common keyword shared by both
+      // cards; if it appears on fewer than minClusterSize cards in the
+      // deck, skip the edge.
+      if (t === 4 && minClusterSize > 1) {
+        let bestCount = 0;
+        for (const k of bFiltered) {
+          if (!aSet.has(k)) continue;
+          const c = keywordCounts.get(k) ?? 0;
+          if (c > bestCount) bestCount = c;
+        }
+        if (bestCount < minClusterSize) continue;
+      }
       edges.push({ source: a.id, target: b.id, tier: t });
     }
   }

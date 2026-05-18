@@ -16,6 +16,7 @@ import {
   type MapCard,
   type MapTier,
 } from "../src/lib/synergy/map";
+import { COMMON_KEYWORD_STOPLIST } from "../src/lib/synergy/stoplist";
 
 // Build a synthetic deck approximating the Hearthhull / World Shaper
 // distribution: heavy on lands + landfall payoffs.
@@ -96,7 +97,11 @@ function escapeXml(s: string): string {
 function main() {
   const cards = syntheticDeck();
   const top = { primary: "land", secondary: "landfall", tertiary: "graveyard-recursion" };
-  const { nodes, edges } = buildMapElements(cards, top, { includeTier4: true });
+  const { nodes, edges } = buildMapElements(cards, top, {
+    includeTier4: true,
+    excludeKeywords: COMMON_KEYWORD_STOPLIST,
+    minClusterSize: 3,
+  });
   const packed = packPieCloud(
     nodes.map((n) => ({
       id: n.id,

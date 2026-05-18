@@ -18,6 +18,7 @@ import {
   type MapTier,
   type MapTop,
 } from "@/lib/synergy/map";
+import { buildExcludeSet } from "@/lib/synergy/stoplist";
 
 // react-cytoscapejs must be client-only (touches `window`). We also
 // register the cose-bilkent layout extension here so it's available
@@ -52,7 +53,6 @@ function artCropFor(url: string | null | undefined): string {
 
 interface Props {
   entries: DeckEntry[];
-  top: Top;
 }
 
 // Sizing + tier classification + edge derivation moved to
@@ -74,7 +74,7 @@ const EDGE_TIER_OPACITY: Record<1 | 2 | 3 | 4, number> = {
   4: 0.08,
 };
 
-export function SynergyMap({ entries, top }: Props) {
+export function SynergyMap({ entries }: Props) {
   // UI toggles ------------------------------------------------------------
   // Default view is card-only; flip to add keyword nodes back in.
   const [showKeywords, setShowKeywords] = useState(false);
@@ -84,6 +84,19 @@ export function SynergyMap({ entries, top }: Props) {
   // apart and the viewport ends up mostly black. We default ON now and
   // style them very subtly so they don't visually dominate.
   const [showQuaternary, setShowQuaternary] = useState(true);
+  // Show keywords like `creature`, `land`, `produces-g` that always
+  // dominate frequency rankings without representing real synergy.
+  // Off = the curated stoplist is applied (see src/lib/synergy/stoplist.ts).
+  const [showCommonWords, setShowCommonWords] = useState(false);
+
+  // Stoplist + min-cluster threshold applied to BOTH top-3 derivation
+  // (so the gold/silver/bronze tiers reflect actual themes) and tier-4
+  // edge derivation (so a keyword shared by only 1-2 cards doesn't
+  // draw a noise edge).
+  const excludeKeywords = useMemo(
+    () => buildExcludeSet({ applyCommon: !showCommonWords }),
+    [showCommonWords],
+  );
 
   // Hover-magnify state ---------------------------------------------------
   const [shiftDown, setShiftDown] = useState(false);
@@ -119,6 +132,29 @@ export function SynergyMap({ entries, top }: Props) {
     for (const e of entries) m.set(e.card.id, e.card);
     return m;
   }, [entries]);
+
+  // Recompute top-3 from the current toggle state. When the stoplist
+  // is on (showCommonWords = false), `creature` and friends are filtered
+  // out, and the actually-interesting keywords (landfall, etb-trigger,
+  // ramp) get promoted into the tier slots.
+  const top = useMemo<Top>(() => {
+    const filtered = (e: DeckEntry) =>
+      e.card.keywords.filter((k) => !excludeKeywords.has(k));
+    const counts = new Map<string, number>();
+    for (const e of entries) {
+      for (const k of filtered(e)) {
+        counts.set(k, (counts.get(k) ?? 0) + e.quantity);
+      }
+    }
+    const sorted = Array.from(counts.entries()).sort(
+      (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
+    );
+    return {
+      primary: sorted[0]?.[0],
+      secondary: sorted[1]?.[0],
+      tertiary: sorted[2]?.[0],
+    };
+  }, [entries, excludeKeywords]);
 
   // Cytoscape elements ----------------------------------------------------
   const elements = useMemo<ElementDefinition[]>(() => {
@@ -166,20 +202,48 @@ export function SynergyMap({ entries, top }: Props) {
       });
     }
 
-    // Card↔card edges, classified by best-shared-keyword tier.
+    // Card↔card edges with stoplist + min-cluster filtering. Drops
+    // stoplisted keywords from each card's set before deriving the
+    // edge, and suppresses tier-4 edges whose strongest underlying
+    // shared keyword appears on < 3 cards in the deck (so isolated
+    // pairs don't draw a "synergy" line). Top-3 edges (gold/silver/
+    // bronze) always render — they back the tiers the user opted into.
+    const MIN_CLUSTER = 3;
+    const keywordCounts = new Map<string, number>();
+    for (const e of entries) {
+      for (const k of e.card.keywords) {
+        if (excludeKeywords.has(k)) continue;
+        keywordCounts.set(k, (keywordCounts.get(k) ?? 0) + 1);
+      }
+    }
+    const filteredKws = entries.map((e) =>
+      e.card.keywords.filter((k) => !excludeKeywords.has(k)),
+    );
     for (let i = 0; i < entries.length; i++) {
-      const a = entries[i].card;
-      const aSet = new Set(a.keywords);
+      const aId = entries[i].card.id;
+      const aSet = new Set(filteredKws[i]);
       for (let j = i + 1; j < entries.length; j++) {
-        const b = entries[j].card;
-        const t = edgeTierFn(b.keywords, aSet, top);
+        const bKws = filteredKws[j];
+        const t = edgeTierFn(bKws, aSet, top);
         if (t === 0) continue;
         if (t === 4 && !showQuaternary) continue;
+        if (t === 4) {
+          // Find the most-common shared keyword backing this edge.
+          // Drop the edge if even that keyword is rare in the deck.
+          let bestCount = 0;
+          for (const k of bKws) {
+            if (!aSet.has(k)) continue;
+            const c = keywordCounts.get(k) ?? 0;
+            if (c > bestCount) bestCount = c;
+          }
+          if (bestCount < MIN_CLUSTER) continue;
+        }
+        const bId = entries[j].card.id;
         els.push({
           data: {
-            id: `e:${a.id}|${b.id}`,
-            source: `card:${a.id}`,
-            target: `card:${b.id}`,
+            id: `e:${aId}|${bId}`,
+            source: `card:${aId}`,
+            target: `card:${bId}`,
             edgeTier: String(t),
           },
         });
@@ -419,6 +483,18 @@ export function SynergyMap({ entries, top }: Props) {
           title="Draw the thinnest tier of edges (cards sharing a non-top-3 keyword)"
         >
           {showQuaternary ? "Dense edges" : "Sparse edges"}
+        </button>
+        <button
+          onClick={() => setShowCommonWords((v) => !v)}
+          className={
+            "rounded border px-2 py-1 backdrop-blur-sm " +
+            (showCommonWords
+              ? "border-amber-400 bg-amber-400/20 text-amber-200"
+              : "border-ink-line bg-ink/60 text-stone-300 hover:text-stone-100")
+          }
+          title="Include common words like 'creature' / 'land' / 'produces-g' in tier ranking + edges. Off by default so synergy themes win the top-3 slots."
+        >
+          {showCommonWords ? "Common words on" : "Common words hidden"}
         </button>
         <span className="rounded border border-ink-line bg-ink/60 px-2 py-1 text-stone-500">
           shift + hover to enlarge
