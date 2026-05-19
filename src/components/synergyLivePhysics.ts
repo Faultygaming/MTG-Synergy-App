@@ -42,25 +42,41 @@ export interface Velocity {
 
 export interface PhysicsParams {
   repulseK: number;
+  // Linear anchor spring constant. Gentle at small displacements so
+  // wiggles feel soft.
   anchorK: number;
+  // Quadratic anchor spring constant. Grows with distance squared, so
+  // the restoring force ramps up sharply once a card is far from its
+  // anchor — "rubber band tightens the more you stretch it".
+  anchorK2: number;
   damping: number;
   vmax: number;
   // Hard cutoff on pairwise repulsion distance. Pairs farther apart
-  // than this skip the calculation entirely. Keep this generous —
-  // cards in a planetary anchor ring can be 400-700 model units
-  // apart even when they're visually adjacent on screen.
+  // than this skip the calculation entirely.
   repulseRange: number;
+  // Hard cap: no card may sit more than `maxDisplacement` model units
+  // away from its anchor. After each integration step, positions are
+  // projected back onto a circle of this radius around the anchor.
+  // This is the "magnetic limit" — cards literally cannot drift past
+  // it no matter how hard they're pushed.
+  maxDisplacement: number;
 }
 
 export const DEFAULT_PARAMS: PhysicsParams = {
-  // Tuned 2026-05 after the initial physics PR shipped with values
-  // that were too weak to visibly displace neighbors. The push needs
-  // to be obvious or users assume the physics isn't running.
-  repulseK: 60000,
-  anchorK: 0.025,
+  // Tuned 2026-05 after the user reported "they spread out, but they
+  // should have hard limits / snap back tighter":
+  //   - Halved repulseK so dragging pushes neighbors visibly without
+  //     blasting them across the canvas.
+  //   - Added quadratic anchor term + hard maxDisplacement so the
+  //     rubber-band feel kicks in well before the cap.
+  //   - Lowered vmax so individual frames can't relocate a card far.
+  repulseK: 25000,
+  anchorK: 0.04,
+  anchorK2: 0.0008,
   damping: 0.78,
-  vmax: 40,
-  repulseRange: 600,
+  vmax: 25,
+  repulseRange: 500,
+  maxDisplacement: 180,
 };
 
 // Pure simulation step. Mutates `velocities` in place; returns the
@@ -80,8 +96,17 @@ export function stepPhysics(
   totalKE: number;
   anyGrabbed: boolean;
 } {
-  const { repulseK, anchorK, damping, vmax, repulseRange } = params;
+  const {
+    repulseK,
+    anchorK,
+    anchorK2,
+    damping,
+    vmax,
+    repulseRange,
+    maxDisplacement,
+  } = params;
   const rangeSq = repulseRange * repulseRange;
+  const maxDispSq = maxDisplacement * maxDisplacement;
   const newPositions = new Map<string, Vec2>();
 
   const forces: Array<Vec2> = new Array(nodes.length);
@@ -107,13 +132,27 @@ export function stepPhysics(
     }
   }
 
-  // Anchor spring — pull each non-grabbed card back toward its
-  // packed position.
+  // Anchor spring — pull each card back toward its packed position.
+  // Linear term gives a soft initial pull; quadratic term ensures
+  // big displacements feel like a tightening rubber band, not a
+  // gradually-weakening string.
   for (let i = 0; i < nodes.length; i++) {
     const a = anchors.get(nodes[i].id);
     if (!a) continue;
-    forces[i].x += anchorK * (a.x - nodes[i].x);
-    forces[i].y += anchorK * (a.y - nodes[i].y);
+    const dx = a.x - nodes[i].x;
+    const dy = a.y - nodes[i].y;
+    const d2 = dx * dx + dy * dy;
+    const d = Math.sqrt(d2);
+    if (d < 0.001) continue;
+    // f = (anchorK + anchorK2 * d) * d, written so we can reuse dx/dy
+    // as the direction. The quadratic coefficient applies to |d|, not
+    // |d|² of the *vector*, so the resulting force magnitude grows
+    // quadratically while remaining radially aligned.
+    const fMag = anchorK * d + anchorK2 * d2;
+    const ux = dx / d;
+    const uy = dy / d;
+    forces[i].x += ux * fMag;
+    forces[i].y += uy * fMag;
   }
 
   // Integrate.
@@ -141,8 +180,37 @@ export function stepPhysics(
       v.vx = (v.vx / sp) * vmax;
       v.vy = (v.vy / sp) * vmax;
     }
+    let nx = n.x + v.vx;
+    let ny = n.y + v.vy;
+
+    // Hard distance cap: project the position back onto a circle of
+    // radius maxDisplacement around the anchor. This is the magnetic
+    // limit the user asked for — cards literally cannot leave their
+    // anchor's territory, no matter how hard they're pushed.
+    const a = anchors.get(n.id);
+    if (a) {
+      const rx = nx - a.x;
+      const ry = ny - a.y;
+      const rd2 = rx * rx + ry * ry;
+      if (rd2 > maxDispSq) {
+        const rd = Math.sqrt(rd2);
+        const ux = rx / rd;
+        const uy = ry / rd;
+        nx = a.x + ux * maxDisplacement;
+        ny = a.y + uy * maxDisplacement;
+        // Strip the outward-radial component of velocity so the card
+        // doesn't fight the wall every frame (which would manifest as
+        // a constant push against the cap that wastes simulation
+        // budget and makes the snap-back feel sluggish).
+        const radial = v.vx * ux + v.vy * uy;
+        if (radial > 0) {
+          v.vx -= radial * ux;
+          v.vy -= radial * uy;
+        }
+      }
+    }
     totalKE += v.vx * v.vx + v.vy * v.vy;
-    newPositions.set(n.id, { x: n.x + v.vx, y: n.y + v.vy });
+    newPositions.set(n.id, { x: nx, y: ny });
   }
 
   return { newPositions, totalKE, anyGrabbed };
