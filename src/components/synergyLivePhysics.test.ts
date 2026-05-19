@@ -109,6 +109,49 @@ describe("stepPhysics", () => {
     expect(b.y).toBeCloseTo(0, 1);
   });
 
+  it("hard caps a card's distance from its anchor at maxDisplacement", () => {
+    // Place a card WAY off its anchor; one step of physics should not
+    // allow it to remain beyond maxDisplacement.
+    const max = DEFAULT_PARAMS.maxDisplacement;
+    const n: PhysicsNode[] = [
+      { id: "card:a", x: 1000, y: 0, grabbed: false },
+    ];
+    const a = anchors(["card:a", 0, 0]);
+    const { newPositions } = stepPhysics(n, a, new Map(), DEFAULT_PARAMS);
+    const p = newPositions.get("card:a")!;
+    const d = Math.sqrt(p.x * p.x + p.y * p.y);
+    // Allow a tiny epsilon for floating-point.
+    expect(d).toBeLessThanOrEqual(max + 0.01);
+  });
+
+  it("even under sustained repulsion from a grabbed neighbor, the cap holds", () => {
+    // Grabbed card sits right on top of the anchor; repulsion would
+    // otherwise push the neighbor arbitrarily far. The cap must
+    // prevent that.
+    const n: PhysicsNode[] = [
+      { id: "card:pusher", x: 0, y: 0, grabbed: true },
+      { id: "card:neighbor", x: 30, y: 0, grabbed: false },
+    ];
+    const a = anchors(["card:pusher", 0, 0], ["card:neighbor", 30, 0]);
+    const velocities = new Map<string, Velocity>();
+    let pos = { x: 30, y: 0 };
+    for (let i = 0; i < 100; i++) {
+      const nodes_i: PhysicsNode[] = [
+        { id: "card:pusher", x: 0, y: 0, grabbed: true },
+        { id: "card:neighbor", x: pos.x, y: pos.y, grabbed: false },
+      ];
+      const { newPositions } = stepPhysics(nodes_i, a, velocities, DEFAULT_PARAMS);
+      pos = newPositions.get("card:neighbor")!;
+    }
+    // Anchor at (30, 0); maxDisplacement = 180. So the neighbor's
+    // farthest possible position is anywhere on a circle of radius
+    // 180 centered at (30, 0).
+    const dxFromAnchor = pos.x - 30;
+    const dyFromAnchor = pos.y - 0;
+    const d = Math.sqrt(dxFromAnchor * dxFromAnchor + dyFromAnchor * dyFromAnchor);
+    expect(d).toBeLessThanOrEqual(DEFAULT_PARAMS.maxDisplacement + 0.01);
+  });
+
   it("a card pushed off-anchor by repulsion still drifts back when the pusher leaves", () => {
     // First: grabbed pusher at (0,0), neighbor at anchor (80,0).
     // Step a few times → neighbor displaced rightward.
